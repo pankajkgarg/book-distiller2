@@ -28,6 +28,9 @@ createApp({
   history: [], lastAssistant: '',
   fileBlob: null, fileInfo: '',
   trace: [],
+  // retry/backoff UI state
+  retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0,
+  lastErrorMessage: '',
 
   model: localStorage.getItem('distillboard.model') || 'gemini-2.5-pro',
   useTemperature: (localStorage.getItem('distillboard.useTemperature')||'false')==='true',
@@ -55,7 +58,15 @@ createApp({
   exportPdf(){ const include = $('#includeTrace').checked ? this.trace : null; makePdf('distillation.pdf', this.combinedText(), include); },
 
   combinedText(){ return this.history.filter(h=>h.role==='model').map(h=>h.parts.map(p=>p.text||'').join('')).join('\n\n').trim(); },
-  appendDoc(md){ const host=$('#liveDoc'); if(host.firstElementChild && host.firstElementChild.classList.contains('muted')) host.innerHTML=''; const sect=el('div','prose'); sect.innerHTML=window.marked.parse(md||''); host.appendChild(sect); host.scrollTo({top: host.scrollHeight, behavior:'smooth'}); },
+  getTitleFromMd(md){
+    const lines=(md||'').split(/\r?\n/);
+    for(const line of lines){
+      const m=line.match(/^\s{0,3}#{1,6}\s+(.+)/); if(m) return m[1].trim();
+      if(line.trim()) return line.trim().slice(0,96);
+    }
+    return `Section ${this.sections+1}`;
+  },
+  appendDoc(md){ const host=$('#liveDoc'); if(host.firstElementChild && host.firstElementChild.classList.contains('muted')) host.innerHTML=''; const container=el('div','section'); const head=el('div','sectionHead'); const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(md)}`); head.appendChild(title); container.appendChild(head); const body=el('div','sectionBody'); const prose=el('div','prose'); prose.innerHTML=window.marked.parse(md||''); body.appendChild(prose); container.appendChild(body); host.appendChild(container); host.scrollTo({top: host.scrollHeight, behavior:'smooth'}); },
   resetDoc(){ $('#liveDoc').innerHTML='<div class="muted">Output will appear here…</div>'; },
 
   async start(){
@@ -137,8 +148,22 @@ createApp({
   async callWithRetries(args){
     let attempt=0, max=5, lastErr=null;
     while(attempt<max){
-      try{ const res = await this.ai.models.generateContent(args); return [res, attempt, null]; }
-      catch(err){ lastErr=err; const code = (err?.error?.code)||(err?.status)||(err?.response?.status); if(code===429 || String(code).startsWith('5') || /RESOURCE_EXHAUSTED|INTERNAL/i.test(JSON.stringify(err))){ const backoff=Math.min(16000, 1000*Math.pow(2,attempt))*(0.75+Math.random()*0.5); await sleep(backoff); attempt++; continue; } return [null, attempt, err]; }
+      try{ this.retrying=false; this.lastErrorMessage=''; const res = await this.ai.models.generateContent(args); return [res, attempt, null]; }
+      catch(err){
+        lastErr=err;
+        const code = (err?.error?.code)||(err?.status)||(err?.response?.status);
+        const msg = err?.message || (typeof err==='string'?err:'');
+        const transient = code===429 || String(code).startsWith('5') || /RESOURCE_EXHAUSTED|INTERNAL/i.test(JSON.stringify(err)) || /NetworkError|Failed to fetch/i.test(String(msg)) || navigator.onLine===false;
+        if(transient){
+          const base=Math.min(16000, 1000*Math.pow(2,attempt));
+          const backoff=Math.floor(base*(0.75+Math.random()*0.5));
+          this.retrying=true; this.retryAttempt=attempt; this.retryMax=max; this.retryRemainingMs=backoff; this.lastErrorMessage=(err?.error?.message)||msg||'Temporary error';
+          const step=250; let remain=backoff;
+          while(remain>0 && this.running){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
+          attempt++; continue;
+        }
+        return [null, attempt, err];
+      }
     }
     return [null, max, lastErr||new Error('Exhausted retries')];
   },
@@ -154,8 +179,8 @@ createApp({
     this.lastAssistant = text; return false;
   },
 
-  cleanFinish(){ this.running=false; if(this.status==='running') this.status='stopped'; },
-  finishWithError(err, req, retries){ this.running=false; this.status='error'; this.pushTrace({request:this.sanitize(req), error:this.serializeErr(err), retries}); toast('API Error: '+(err?.message||'unknown'),'bad',7000); },
+  cleanFinish(){ this.running=false; this.retrying=false; if(this.status==='running') this.status='stopped'; },
+  finishWithError(err, req, retries){ this.running=false; this.retrying=false; this.status='error'; this.pushTrace({request:this.sanitize(req), error:this.serializeErr(err), retries}); toast('API Error: '+(err?.message||'unknown'),'bad',7000); },
 }).mount();
 
 // Update theme on system preference change when in Auto mode

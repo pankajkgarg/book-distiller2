@@ -51,6 +51,9 @@
         <div class="status">• tokens: <span>{{ tokenTally }}</span></div>
         <div class="status">• end marker: <span class="kbd">&lt;{{ endMarkerEscaped }}&gt;</span></div>
         <div class="grow"></div>
+        <div class="status" v-if="retrying">
+          <span class="pill" :title="lastErrorMessage || 'Temporary issue'"><span class="spinner"></span> Retrying in {{ Math.ceil(retryRemainingMs/1000) }}s ({{ retryAttempt+1 }}/{{ retryMax }}) — {{ (lastErrorMessage||'').slice(0,80) }}</span>
+        </div>
         <div class="muted">Edit the prompt anytime; applies next turn.</div>
         <span style="display:none" v-effect="persist(); applyTheme()"></span>
       </div>

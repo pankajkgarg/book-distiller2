@@ -25,6 +25,13 @@ textarea{min-height:180px;resize:vertical;font-family:ui-monospace,SFMono-Regula
 .doc{height:calc(100vh - 220px);overflow:auto;padding:16px}
 .prose{max-width:100%}
 .prose blockquote{margin:10px 0;padding:8px 12px;border-left:4px solid var(--line);background:var(--surface-alt);color:var(--fg)}
+.section{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:var(--surface)}
+.section .sectionHead{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--surface-alt)}
+.section .sectionTitle{font-weight:600}
+.section .sectionBody{padding:10px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:var(--surface-alt);color:var(--muted);font-size:12px}
+.spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 .trace{position:fixed;right:0;top:0;height:100vh;width:min(520px,100%);background:var(--surface);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .25s ease;display:flex;flex-direction:column}
 .trace.open{transform:none}
 .trace .head{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
