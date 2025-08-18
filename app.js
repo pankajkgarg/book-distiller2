@@ -81,12 +81,20 @@ createApp({
     // init SDK
     this.ai = new GoogleGenAI({ apiKey: this.apiKey.trim() });
 
-    // upload via Files API and poll ACTIVE
-    try{
-      this.uploadedFile = await this.ai.files.upload({ file: this.fileBlob, config: { displayName: this.fileBlob.name } });
-      let tries=0; while(this.uploadedFile.state==='PROCESSING' && tries<60){ await sleep(2000); this.uploadedFile = await this.ai.files.get({ name: this.uploadedFile.name }); tries++; }
-      if(this.uploadedFile.state==='FAILED') throw new Error('File processing failed on Gemini.');
-    }catch(e){ this.status='error'; toast('Upload failed: '+(e?.message||'unknown'),'bad',6000); this.pushTrace({request:{step:'files.upload'}, error:this.serializeErr(e), retries:0}); return; }
+    // upload via Files API and poll ACTIVE (with retries and RetryInfo)
+    {
+      const [up, utries, uerr] = await this.callWithRetriesFn(()=>this.ai.files.upload({ file: this.fileBlob, config: { displayName: this.fileBlob.name } }));
+      if(uerr){ if(String(uerr?.message)==='__aborted__') return; this.status='error'; toast('Upload failed: '+(uerr?.message||'unknown'),'bad',6000); this.pushTrace({request:{step:'files.upload'}, error:this.serializeErr(uerr), retries:utries}); return; }
+      this.uploadedFile = up;
+      let tries=0;
+      while(this.uploadedFile.state==='PROCESSING' && tries<120){
+        await sleep(2000);
+        const [got, gtries, gerr] = await this.callWithRetriesFn(()=>this.ai.files.get({ name: this.uploadedFile.name }));
+        if(gerr){ if(String(gerr?.message)==='__aborted__') return; this.status='error'; toast('Polling failed: '+(gerr?.message||'unknown'),'bad',6000); this.pushTrace({request:{step:'files.get'}, error:this.serializeErr(gerr), retries:gtries}); return; }
+        this.uploadedFile = got; tries++;
+      }
+      if(this.uploadedFile.state==='FAILED'){ this.status='error'; const err=new Error('File processing failed on Gemini.'); this.pushTrace({request:{step:'files.process'}, error:this.serializeErr(err), retries:0}); toast(err.message,'bad'); return; }
+    }
 
     this.running=true; this.status='running'; this.startTime=Date.now();
 
@@ -116,8 +124,7 @@ createApp({
       const [resp, tries, err] = await this.callWithRetries(req);
       if(err){
         if(String(err?.message)==='__aborted__') return;
-        const msg=String(err?.message||'');
-        if(/Unsupported file uri/i.test(msg)){
+        if(err?.error?.status==='FAILED_PRECONDITION' || /Unsupported file uri/i.test(String(err?.message||''))){
           toast('File reference invalid; re-uploading once…','warn');
           try{ this.uploadedFile = await this.ai.files.upload({ file:this.fileBlob, config:{ displayName:this.fileBlob.name }}); }
           catch(e){ this.finishWithError(err, req, tries); return; }
@@ -146,22 +153,70 @@ createApp({
   pushTrace({request,response,error,retries}){ const ts=new Date().toISOString(); this.trace.push({ts,request,response,error,retries}); const card=el('div','item'); card.appendChild(el('div','',`<b>${error?'Error':'Turn'}</b> <span class=\"muted\" style=\"float:right\">${new Date().toLocaleTimeString()}</span>`)); const rq=el('div','pre'); rq.textContent=JSON.stringify(request,null,2); card.appendChild(el('div','muted','Request:')); card.appendChild(rq); if(response){ const rs=el('div','pre'); rs.textContent=JSON.stringify(response,null,2); card.appendChild(el('div','muted','Response:')); card.appendChild(rs);} if(error){ const er=el('div','pre'); er.textContent=JSON.stringify(error,null,2); card.appendChild(el('div','muted','Error:')); card.appendChild(er);} if(retries>0) card.appendChild(el('div','muted',`Retries: ${retries}`)); $('#traceList').prepend(card); },
   extractText(resp){ const json=resp?.raw || resp; const c=json?.candidates?.[0]; const parts=c?.content?.parts||[]; return parts.map(p=>p.text||'').join(''); },
 
+  // SDK-aware retry helpers using structured code/status and RetryInfo
+  parseRetryDelay(err){
+    try{
+      const details = err?.error?.details || [];
+      const info = details.find(d=>d?.['@type']?.includes('google.rpc.RetryInfo'));
+      const s = info?.retryDelay || info?.retry_delay;
+      if(!s) return null;
+      const m = String(s).match(/([0-9]+(?:\.[0-9]+)?)s/i);
+      if(m) return Math.max(0, Math.floor(parseFloat(m[1])*1000));
+      return null;
+    }catch{ return null; }
+  },
+  isTransient(err){
+    const code = (err?.error?.code) ?? (err?.response?.status) ?? (err?.status);
+    const status = err?.error?.status;
+    if(typeof code==='number'){
+      if(code===429 || code===408 || code===425) return true;
+      if(code>=500 && code<600) return true;
+    }
+    if(status==='RESOURCE_EXHAUSTED' || status==='INTERNAL' || status==='UNAVAILABLE' || status==='ABORTED') return true;
+    if(typeof navigator!=='undefined' && navigator.onLine===false) return true;
+    return false;
+  },
+  async backoffWait(ms){
+    this.retrying=true; this.retryMax='∞'; this.retryRemainingMs=ms;
+    const step=250; let remain=ms;
+    while(remain>0 && this.running && !this.paused){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
+  },
   async callWithRetries(args){
     let attempt=0, lastErr=null;
     while(this.running && !this.paused){
       try{ this.retrying=false; this.lastErrorMessage=''; const res = await this.ai.models.generateContent(args); return [res, attempt, null]; }
       catch(err){
-        lastErr=err;
-        const code = (err?.error?.code)||(err?.status)||(err?.response?.status);
-        const msg = err?.message || (typeof err==='string'?err:'');
-        const transient = code===429 || String(code).startsWith('5') || /RESOURCE_EXHAUSTED|INTERNAL/i.test(JSON.stringify(err)) || /NetworkError|Failed to fetch/i.test(String(msg)) || navigator.onLine===false;
+        lastErr=err; const transient=this.isTransient(err);
         if(transient){
+          const suggested=this.parseRetryDelay(err);
           const base=Math.min(60000, 1000*Math.pow(2,attempt));
-          const backoff=Math.floor(base*(0.75+Math.random()*0.5));
-          this.retrying=true; this.retryAttempt=attempt; this.retryMax='∞'; this.retryRemainingMs=backoff; this.lastErrorMessage=(err?.error?.message)||msg||'Temporary error';
-          const step=250; let remain=backoff;
-          while(remain>0 && this.running && !this.paused){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
+          const fallback=Math.floor(base*(0.75+Math.random()*0.5));
+          const waitMs = suggested ?? fallback;
+          this.retryAttempt=attempt; this.lastErrorMessage=err?.error?.message || err?.message || 'Temporary error';
+          await this.backoffWait(waitMs);
           if(!this.running || this.paused) break;
+          attempt++; continue;
+        }
+        return [null, attempt, err];
+      }
+    }
+    return [null, attempt, lastErr||new Error('__aborted__')];
+  },
+  async callWithRetriesFn(fn){
+    let attempt=0, lastErr=null;
+    // Allow use before running=true (upload phase), or during run if not paused
+    while(!this.running || (this.running && !this.paused)){
+      try{ this.retrying=false; this.lastErrorMessage=''; const res = await fn(); return [res, attempt, null]; }
+      catch(err){
+        lastErr=err; const transient=this.isTransient(err);
+        if(transient){
+          const suggested=this.parseRetryDelay(err);
+          const base=Math.min(60000, 1000*Math.pow(2,attempt));
+          const fallback=Math.floor(base*(0.75+Math.random()*0.5));
+          const waitMs = suggested ?? fallback;
+          this.retryAttempt=attempt; this.lastErrorMessage=err?.error?.message || err?.message || 'Temporary error';
+          await this.backoffWait(waitMs);
+          if(this.paused) break;
           attempt++; continue;
         }
         return [null, attempt, err];
