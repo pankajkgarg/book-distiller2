@@ -24,12 +24,14 @@ A tiny client‑side app that uploads a book (PDF/EPUB) and iteratively distills
 
 - If you open `index.html` via `file://`, browsers block ESM scripts (CORS). Use the dev server (`npm run dev`) or any static server (e.g., `python3 -m http.server`).
 - Ensure your network allows access to the CDNs and Google APIs.
+- Transient API errors (429/5xx/network) auto‑retry with exponential backoff; you’ll see a countdown and error snippet in the top status bar.
 
 ## Folder Layout
 
 - `index.html`: Markup and component structure
 - `styles.css`: Styles
 - `app.js`: Petite‑Vue app and Gemini requests
+  - Live Document renders each turn as a separate, titled section.
 
 ---
 
