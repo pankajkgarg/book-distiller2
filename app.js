@@ -95,7 +95,7 @@ createApp({
     const userFirst = createUserContent([ filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.' ]);
     const req1 = { model: this.model, contents:[ userFirst ], config: this.makeConfig() };
     const [resp1, r1tries, r1err] = await this.callWithRetries(req1);
-    if(r1err){ this.finishWithError(r1err, req1, r1tries); return; }
+    if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
     const text1 = resp1?.text || this.extractText(resp1);
     this.history.push(userFirst); this.history.push({role:'model', parts:[{text:text1}]});
     this.sections+=1; this.tokenTally+=estimateTokens(text1); this.appendDoc(text1);
@@ -115,6 +115,7 @@ createApp({
       const req = { model:this.model, contents:[...this.history, nextUser], config: this.makeConfig() };
       const [resp, tries, err] = await this.callWithRetries(req);
       if(err){
+        if(String(err?.message)==='__aborted__') return;
         const msg=String(err?.message||'');
         if(/Unsupported file uri/i.test(msg)){
           toast('File reference invalid; re-uploading once…','warn');
@@ -146,8 +147,8 @@ createApp({
   extractText(resp){ const json=resp?.raw || resp; const c=json?.candidates?.[0]; const parts=c?.content?.parts||[]; return parts.map(p=>p.text||'').join(''); },
 
   async callWithRetries(args){
-    let attempt=0, max=5, lastErr=null;
-    while(attempt<max){
+    let attempt=0, lastErr=null;
+    while(this.running && !this.paused){
       try{ this.retrying=false; this.lastErrorMessage=''; const res = await this.ai.models.generateContent(args); return [res, attempt, null]; }
       catch(err){
         lastErr=err;
@@ -155,17 +156,18 @@ createApp({
         const msg = err?.message || (typeof err==='string'?err:'');
         const transient = code===429 || String(code).startsWith('5') || /RESOURCE_EXHAUSTED|INTERNAL/i.test(JSON.stringify(err)) || /NetworkError|Failed to fetch/i.test(String(msg)) || navigator.onLine===false;
         if(transient){
-          const base=Math.min(16000, 1000*Math.pow(2,attempt));
+          const base=Math.min(60000, 1000*Math.pow(2,attempt));
           const backoff=Math.floor(base*(0.75+Math.random()*0.5));
-          this.retrying=true; this.retryAttempt=attempt; this.retryMax=max; this.retryRemainingMs=backoff; this.lastErrorMessage=(err?.error?.message)||msg||'Temporary error';
+          this.retrying=true; this.retryAttempt=attempt; this.retryMax='∞'; this.retryRemainingMs=backoff; this.lastErrorMessage=(err?.error?.message)||msg||'Temporary error';
           const step=250; let remain=backoff;
-          while(remain>0 && this.running){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
+          while(remain>0 && this.running && !this.paused){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
+          if(!this.running || this.paused) break;
           attempt++; continue;
         }
         return [null, attempt, err];
       }
     }
-    return [null, max, lastErr||new Error('Exhausted retries')];
+    return [null, attempt, lastErr||new Error('__aborted__')];
   },
 
   async postTurnChecks(text){
