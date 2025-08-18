@@ -1,0 +1,25 @@
+node_modules
+.DS_Store
+dist
+dist-ssr
+*.local
+
+.svelte-kit
+
+yarn-error.log*
+.pnpm-debug.log*
+
+# TS
+*.tsbuildinfo
+
+# Turbo
+.turbo
+
+stats.*
+
+# Test
+coverage/
+
+.tanstack
+.output
+.vercel
