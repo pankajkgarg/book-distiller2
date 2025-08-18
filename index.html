@@ -35,6 +35,11 @@
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
           Trace ⟷
         </button>
+        <button class="btn" @click="toggleDark">
+          <svg v-if="!darkMode" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+          <svg v-else class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg>
+          {{ darkMode ? 'Light' : 'Dark' }}
+        </button>
         <button class="btn" @click="openInfo">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 11h2v5h-2z"/></svg>
           Info
@@ -47,7 +52,7 @@
         <div class="status">• end marker: <span class="kbd">&lt;{{ endMarkerEscaped }}&gt;</span></div>
         <div class="grow"></div>
         <div class="muted">Edit the prompt anytime; applies next turn.</div>
-        <span style="display:none" v-effect="persist()"></span>
+        <span style="display:none" v-effect="persist(); applyTheme()"></span>
       </div>
     </div>
   </div>
@@ -183,4 +188,3 @@
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-

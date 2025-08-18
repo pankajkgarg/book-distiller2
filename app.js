@@ -32,6 +32,7 @@ createApp({
   model: localStorage.getItem('distillboard.model') || 'gemini-2.5-pro',
   useTemperature: (localStorage.getItem('distillboard.useTemperature')||'false')==='true',
   temperature: +(localStorage.getItem('distillboard.temperature')||'1.0'),
+  darkMode: (()=>{ const v=localStorage.getItem('distillboard.dark'); if(v===null){ return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches; } return v==='true'; })(),
   ai: null, uploadedFile: null, startTime: 0,
 
   // computed
@@ -47,6 +48,7 @@ createApp({
   downloadTrace(){ const blob=new Blob([JSON.stringify(this.trace,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='trace.json'; a.click(); URL.revokeObjectURL(a.href); },
   openExport(){ $('#exportModal').showModal(); },
   openInfo(){ $('#infoModal').showModal(); },
+  toggleDark(){ this.darkMode=!this.darkMode; this.applyTheme(); this.persist(); toast(this.darkMode?'Dark mode':'Light mode','info'); },
   async copyAll(){ const text=this.combinedText(); try{ await navigator.clipboard.writeText(text); toast('Copied combined text','good'); }catch{ download('distillation.txt', text); } },
   exportMd(){ download('distillation.md', this.combinedText(), 'text/markdown;charset=utf-8'); },
   exportTxt(){ download('distillation.txt', this.combinedText()); },
@@ -126,6 +128,8 @@ createApp({
   // helpers
   sanitize(req){ return JSON.parse(JSON.stringify(req)); },
   makeConfig(){ const cfg={ systemInstruction: this.prompt }; if(this.useTemperature){ cfg.generationConfig={ temperature: Number(this.temperature)||0 }; } return cfg; },
+  applyTheme(){ document.body.classList.toggle('dark', !!this.darkMode); },
+  persist(){ try{ localStorage.setItem('distillboard.prompt', this.prompt||''); localStorage.setItem('distillboard.model', this.model||''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature??'')); localStorage.setItem('distillboard.dark', String(!!this.darkMode)); }catch{} },
   serializeErr(e){ if(!e) return {message:'unknown'}; if(typeof e==='string') return {message:e}; return { message: e.message||'unknown', name:e.name||'Error', raw:e?.response||e?.toString?.() }; },
   pushTrace({request,response,error,retries}){ const ts=new Date().toISOString(); this.trace.push({ts,request,response,error,retries}); const card=el('div','item'); card.appendChild(el('div','',`<b>${error?'Error':'Turn'}</b> <span class=\"muted\" style=\"float:right\">${new Date().toLocaleTimeString()}</span>`)); const rq=el('div','pre'); rq.textContent=JSON.stringify(request,null,2); card.appendChild(el('div','muted','Request:')); card.appendChild(rq); if(response){ const rs=el('div','pre'); rs.textContent=JSON.stringify(response,null,2); card.appendChild(el('div','muted','Response:')); card.appendChild(rs);} if(error){ const er=el('div','pre'); er.textContent=JSON.stringify(error,null,2); card.appendChild(el('div','muted','Error:')); card.appendChild(er);} if(retries>0) card.appendChild(el('div','muted',`Retries: ${retries}`)); $('#traceList').prepend(card); },
   extractText(resp){ const json=resp?.raw || resp; const c=json?.candidates?.[0]; const parts=c?.content?.parts||[]; return parts.map(p=>p.text||'').join(''); },
@@ -153,4 +157,3 @@ createApp({
   cleanFinish(){ this.running=false; if(this.status==='running') this.status='stopped'; },
   finishWithError(err, req, retries){ this.running=false; this.status='error'; this.pushTrace({request:this.sanitize(req), error:this.serializeErr(err), retries}); toast('API Error: '+(err?.message||'unknown'),'bad',7000); },
 }).mount();
-
