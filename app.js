@@ -48,7 +48,7 @@ createApp({
   downloadTrace(){ const blob=new Blob([JSON.stringify(this.trace,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='trace.json'; a.click(); URL.revokeObjectURL(a.href); },
   openExport(){ $('#exportModal').showModal(); },
   openInfo(){ $('#infoModal').showModal(); },
-  toggleThemeMode(){ this.themeMode = this.themeMode==='auto' ? 'dark' : (this.themeMode==='dark' ? 'light' : 'auto'); this.applyTheme(); this.persist(); toast('Theme: '+this.themeMode,'info'); },
+  onThemeChange(){ this.applyTheme(); this.persist(); toast('Theme: '+this.themeMode,'info'); },
   async copyAll(){ const text=this.combinedText(); try{ await navigator.clipboard.writeText(text); toast('Copied combined text','good'); }catch{ download('distillation.txt', text); } },
   exportMd(){ download('distillation.md', this.combinedText(), 'text/markdown;charset=utf-8'); },
   exportTxt(){ download('distillation.txt', this.combinedText()); },
@@ -128,7 +128,6 @@ createApp({
   // helpers
   sanitize(req){ return JSON.parse(JSON.stringify(req)); },
   makeConfig(){ const cfg={ systemInstruction: this.prompt }; if(this.useTemperature){ cfg.generationConfig={ temperature: Number(this.temperature)||0 }; } return cfg; },
-  get themeLabel(){ return this.themeMode==='auto'?'Auto':(this.themeMode==='dark'?'Dark':'Light'); },
   applyTheme(){ const preferDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches; const isDark = this.themeMode==='dark' || (this.themeMode==='auto' && preferDark); document.body.classList.toggle('dark', isDark); },
   persist(){ try{ localStorage.setItem('distillboard.prompt', this.prompt||''); localStorage.setItem('distillboard.model', this.model||''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature??'')); localStorage.setItem('distillboard.themeMode', this.themeMode||'auto'); localStorage.removeItem('distillboard.dark'); }catch{} },
   serializeErr(e){ if(!e) return {message:'unknown'}; if(typeof e==='string') return {message:e}; return { message: e.message||'unknown', name:e.name||'Error', raw:e?.response||e?.toString?.() }; },

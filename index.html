@@ -35,7 +35,11 @@
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
           Trace ⟷
         </button>
-        <button class="btn" @click="toggleThemeMode">Theme: {{ themeLabel }}</button>
+        <select v-model="themeMode" @change="onThemeChange" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg)">
+          <option value="auto">Theme: Auto</option>
+          <option value="dark">Theme: Dark</option>
+          <option value="light">Theme: Light</option>
+        </select>
         <button class="btn" @click="openInfo">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 11h2v5h-2z"/></svg>
           Info
