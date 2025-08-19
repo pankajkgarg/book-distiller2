@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## 2025-08-19
+- Docs: added `docs/WORKFLOW.md` documenting the full runtime workflow, retries, and invalid file URI recovery; referenced from code and README.
 - Fix: only send "Next" on subsequent turns (no file reattachment); first turn still includes the uploaded file for context.
 - Fix: when a file URI becomes invalid, re-upload once and update prior history file parts to reference the new URI.
 - Refactor: extracted Gemini SDK wiring and retry/backoff logic into a new `gemini.js` service.

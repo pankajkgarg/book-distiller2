@@ -4,6 +4,10 @@ Live site: https://pankajkgarg.github.io/book-distiller2/
 
 A tiny client‑side app that uploads a book (PDF/EPUB) and iteratively distills it using Google Gemini. Built with Petite‑Vue, no backend required.
 
+## How It Works
+
+See `docs/WORKFLOW.md` for the authoritative description of the request flow, retries, error handling, and file‑reference recovery. Keep this doc updated alongside code changes.
+
 ## Getting Started
 
 - Install deps: `npm install`

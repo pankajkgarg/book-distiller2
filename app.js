@@ -1,3 +1,4 @@
+// Conversation workflow and error handling are documented in docs/WORKFLOW.md
 import { createApp } from 'https://unpkg.com/petite-vue?module';
 import { createGeminiService, createUserContent, createPartFromUri } from './gemini.js';
 
@@ -126,7 +127,7 @@ createApp({
 
     this.running=true; this.status='running'; this.startTime=Date.now();
 
-    // First turn
+    // First turn (see docs/WORKFLOW.md: Turn Structure)
     const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
     const userFirst = createUserContent([ filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.' ]);
     const req1 = { model: this.model, contents:[ userFirst ], tools: [], config: this.makeConfig() };
@@ -147,12 +148,14 @@ createApp({
       if(+this.budgetTokens>0 && this.tokenTally >= +this.budgetTokens){ this.status='token budget reached (est)'; toast('Token budget (estimated) reached','warn'); break; }
 
       // After the first turn, only send "Next"; do not reattach the file.
+      // See docs/WORKFLOW.md → Turn Structure
       const nextUser = createUserContent([ 'Next' ]);
       const req = { model:this.model, contents:[...this.history, nextUser], tools: [], config: this.makeConfig() };
       const [resp, tries, err] = await this.gem.callWithRetries(req);
       if(err){
         if(String(err?.message)==='__aborted__') return;
         if(err?.error?.status==='FAILED_PRECONDITION' || /Unsupported file uri/i.test(String(err?.message||''))){
+          // See docs/WORKFLOW.md → Invalid File Reference Recovery
           toast('File reference invalid; re-uploading and updating history…','warn');
           try{
             // Re-upload file
