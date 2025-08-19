@@ -30,8 +30,27 @@ A tiny client‑side app that uploads a book (PDF/EPUB) and iteratively distills
 
 - `index.html`: Markup and component structure
 - `styles.css`: Styles
-- `app.js`: Petite‑Vue app and Gemini requests
+- `app.js`: Petite‑Vue app and state (UI + flow)
+- `gemini.js`: Gemini SDK wiring and retry/backoff helpers
   - Live Document renders each turn as a separate, titled section.
+
+## Changelog
+
+See `CHANGELOG.md` for notable changes.
+
+## Deploy to GitHub Pages
+
+This is a static site. The included GitHub Actions workflow publishes it to GitHub Pages on every push to `main`.
+
+Steps:
+
+1) GitHub → Settings → Pages → Build and deployment → Source: select “GitHub Actions”.
+2) Push to `main` (or run the workflow manually). The site publishes at:
+   `https://<your-username>.github.io/<repo-name>/`.
+
+Notes:
+- The workflow uploads the repository root (no build step required).
+- If you prefer a built bundle via Vite, set `upload path: dist` and add a build step in the workflow (and set `base` in Vite config for subpath deploys).
 
 ---
 
