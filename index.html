@@ -51,6 +51,10 @@
         <div class="status">• tokens: <span>{{ tokenTally }}</span></div>
         <div class="status">• end marker: <span class="kbd">&lt;{{ endMarkerEscaped }}&gt;</span></div>
         <div class="grow"></div>
+        <div class="status" v-if="paused && lastErrorMessage">
+          <span class="pill bad" :title="lastErrorMessage">Error: {{ (lastErrorMessage||'').slice(0,80) }}</span>
+          <button class="btn" style="margin-left:8px" @click="resumeOrStart">Resume</button>
+        </div>
         <div class="status" v-if="retrying">
           <span class="pill" :title="lastErrorMessage || 'Temporary issue'"><span class="spinner"></span> Retrying in {{ Math.ceil(retryRemainingMs/1000) }}s ({{ retryAttempt+1 }}/{{ retryMax }}) — {{ (lastErrorMessage||'').slice(0,80) }}</span>
         </div>

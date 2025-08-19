@@ -84,16 +84,34 @@ createApp({
     // upload via Files API and poll ACTIVE (with retries and RetryInfo)
     {
       const [up, utries, uerr] = await this.callWithRetriesFn(()=>this.ai.files.upload({ file: this.fileBlob, config: { displayName: this.fileBlob.name } }));
-      if(uerr){ if(String(uerr?.message)==='__aborted__') return; this.status='error'; toast('Upload failed: '+(uerr?.message||'unknown'),'bad',6000); this.pushTrace({request:{step:'files.upload'}, error:this.serializeErr(uerr), retries:utries}); return; }
+      if(uerr){
+        if(String(uerr?.message)==='__aborted__') return;
+        this.paused = true; this.status='paused (error)'; this.lastErrorMessage = uerr?.message||'unknown';
+        toast('Upload failed: '+(uerr?.message||'unknown'),'bad',6000);
+        this.pushTrace({request:{step:'files.upload'}, error:this.serializeErr(uerr), retries:utries});
+        return;
+      }
       this.uploadedFile = up;
       let tries=0;
       while(this.uploadedFile.state==='PROCESSING' && tries<120){
         await sleep(2000);
         const [got, gtries, gerr] = await this.callWithRetriesFn(()=>this.ai.files.get({ name: this.uploadedFile.name }));
-        if(gerr){ if(String(gerr?.message)==='__aborted__') return; this.status='error'; toast('Polling failed: '+(gerr?.message||'unknown'),'bad',6000); this.pushTrace({request:{step:'files.get'}, error:this.serializeErr(gerr), retries:gtries}); return; }
+        if(gerr){
+          if(String(gerr?.message)==='__aborted__') return;
+          this.paused = true; this.status='paused (error)'; this.lastErrorMessage = gerr?.message||'unknown';
+          toast('Polling failed: '+(gerr?.message||'unknown'),'bad',6000);
+          this.pushTrace({request:{step:'files.get'}, error:this.serializeErr(gerr), retries:gtries});
+          return;
+        }
         this.uploadedFile = got; tries++;
       }
-      if(this.uploadedFile.state==='FAILED'){ this.status='error'; const err=new Error('File processing failed on Gemini.'); this.pushTrace({request:{step:'files.process'}, error:this.serializeErr(err), retries:0}); toast(err.message,'bad'); return; }
+      if(this.uploadedFile.state==='FAILED'){
+        const err=new Error('File processing failed on Gemini.');
+        this.paused = true; this.status='paused (error)'; this.lastErrorMessage = err.message;
+        this.pushTrace({request:{step:'files.process'}, error:this.serializeErr(err), retries:0});
+        toast(err.message,'bad');
+        return;
+      }
     }
 
     this.running=true; this.status='running'; this.startTime=Date.now();
@@ -143,6 +161,13 @@ createApp({
 
   togglePause(){ this.paused=!this.paused; toast(this.paused?'Paused':'Resumed', 'info'); if(!this.paused && this.running) this.nextLoop(); },
   stop(){ this.running=false; this.status='stopped'; toast('Stopped','warn'); },
+  resumeOrStart(){
+    if(this.running){
+      if(this.paused) this.togglePause();
+    } else {
+      this.start();
+    }
+  },
 
   // helpers
   sanitize(req){ return JSON.parse(JSON.stringify(req)); },
@@ -156,22 +181,56 @@ createApp({
   // SDK-aware retry helpers using structured code/status and RetryInfo
   parseRetryDelay(err){
     try{
+      // Prefer Google RetryInfo if present (can be string or {seconds,nanos})
       const details = err?.error?.details || [];
       const info = details.find(d=>d?.['@type']?.includes('google.rpc.RetryInfo'));
-      const s = info?.retryDelay || info?.retry_delay;
-      if(!s) return null;
-      const m = String(s).match(/([0-9]+(?:\.[0-9]+)?)s/i);
-      if(m) return Math.max(0, Math.floor(parseFloat(m[1])*1000));
+      const rd = info?.retryDelay || info?.retry_delay;
+      if(rd){
+        if(typeof rd === 'object' && (rd.seconds!==undefined || rd.nanos!==undefined)){
+          const secs = Number(rd.seconds||0) + Number(rd.nanos||0)/1e9;
+          if(Number.isFinite(secs) && secs>=0) return Math.floor(secs*1000);
+        }
+        const m = String(rd).match(/([0-9]+(?:\.[0-9]+)?)s/i);
+        if(m) return Math.max(0, Math.floor(parseFloat(m[1])*1000));
+      }
+      // Fall back to HTTP Retry-After (seconds or HTTP-date)
+      const headers = (err?.response?.headers) || (err?.headers) || {};
+      const getHeader = (h)=> headers?.get ? headers.get(h) : (headers[h] || headers[h?.toLowerCase?.()] || headers[String(h).toLowerCase?.()] );
+      const ra = getHeader && (getHeader('retry-after') || getHeader('Retry-After'));
+      if(ra){
+        const secs = Number(ra);
+        if(Number.isFinite(secs)) return Math.max(0, Math.floor(secs*1000));
+        const when = Date.parse(String(ra));
+        if(!Number.isNaN(when)){
+          const ms = when - Date.now();
+          if(ms>0) return ms;
+        }
+      }
       return null;
     }catch{ return null; }
   },
   isTransient(err){
-    const code = (err?.error?.code) ?? (err?.response?.status) ?? (err?.status);
-    const status = err?.error?.status;
-    if(typeof code==='number'){
-      if(code===429 || code===408 || code===425) return true;
-      if(code>=500 && code<600) return true;
+    // Normalize a variety of possible code locations/types
+    const candidates = [
+      err?.error?.code,
+      err?.response?.status,
+      err?.status,
+      err?.statusCode,
+      err?.code,
+    ];
+    for(const c of candidates){
+      if(typeof c === 'number'){
+        if(c===429 || c===408 || c===425) return true;
+        if(c>=500 && c<600) return true;
+      }else if(typeof c === 'string' && c){
+        const n = Number(c);
+        if(Number.isFinite(n)){
+          if(n===429 || n===408 || n===425) return true;
+          if(n>=500 && n<600) return true;
+        }
+      }
     }
+    const status = err?.error?.status || err?.statusText;
     if(status==='RESOURCE_EXHAUSTED' || status==='INTERNAL' || status==='UNAVAILABLE' || status==='ABORTED') return true;
     if(typeof navigator!=='undefined' && navigator.onLine===false) return true;
     return false;
@@ -237,7 +296,15 @@ createApp({
   },
 
   cleanFinish(){ this.running=false; this.retrying=false; if(this.status==='running') this.status='stopped'; },
-  finishWithError(err, req, retries){ this.running=false; this.retrying=false; this.status='error'; this.pushTrace({request:this.sanitize(req), error:this.serializeErr(err), retries}); toast('API Error: '+(err?.message||'unknown'),'bad',7000); },
+  finishWithError(err, req, retries){
+    // Pause instead of aborting on errors
+    this.retrying=false;
+    this.paused=true;
+    this.status='paused (error)';
+    this.lastErrorMessage = err?.message || 'unknown';
+    this.pushTrace({request:this.sanitize(req), error:this.serializeErr(err), retries});
+    toast('API Error: '+(err?.message||'unknown'),'bad',7000);
+  },
 }).mount();
 
 // Update theme on system preference change when in Auto mode
