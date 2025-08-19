@@ -12,3 +12,4 @@ All notable changes to this project will be documented in this file.
 - UI: widened model dropdown for readability; modernized file chooser button; display a rough token estimate (size/4) after upload.
 - Docs: linked `CHANGELOG.md` from README and added Pages deployment instructions.
 - CI: added GitHub Actions workflow to publish to GitHub Pages on push to `main`.
+- Fix: explicitly send empty `tools` array in Gemini requests to avoid Google Search grounding.

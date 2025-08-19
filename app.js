@@ -129,7 +129,7 @@ createApp({
     // First turn
     const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
     const userFirst = createUserContent([ filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.' ]);
-    const req1 = { model: this.model, contents:[ userFirst ], config: this.makeConfig() };
+    const req1 = { model: this.model, contents:[ userFirst ], tools: [], config: this.makeConfig() };
     const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
     if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
     const text1 = resp1?.text || this.gem.extractText(resp1);
@@ -148,7 +148,7 @@ createApp({
 
       const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
       const nextUser = createUserContent([ filePart, 'Next' ]);
-      const req = { model:this.model, contents:[...this.history, nextUser], config: this.makeConfig() };
+      const req = { model:this.model, contents:[...this.history, nextUser], tools: [], config: this.makeConfig() };
       const [resp, tries, err] = await this.gem.callWithRetries(req);
       if(err){
         if(String(err?.message)==='__aborted__') return;

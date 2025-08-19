@@ -21,6 +21,7 @@ A tiny client‑side app that uploads a book (PDF/EPUB) and iteratively distills
 - Keep your Gemini API key in the UI field; it’s stored in `localStorage` only on your machine.
 - Model, prompt, and generation temperature persist in `localStorage` as well.
 - External libs (Petite‑Vue, @google/genai, marked, jsPDF) are loaded from CDNs.
+- Requests explicitly omit search tools so Gemini responds without Google Search grounding.
 
 ## Troubleshooting
 
