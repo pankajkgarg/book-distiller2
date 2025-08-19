@@ -32,7 +32,7 @@ createApp({
   retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0,
   lastErrorMessage: '',
 
-  model: localStorage.getItem('distillboard.model') || 'gemini-2.5-pro',
+  model: (()=>{ const allowed=['gemini-2.5-pro','gemini-2.5-flash','gemini-2.5-flash-lite']; const saved=localStorage.getItem('distillboard.model'); return allowed.includes(saved)?saved:'gemini-2.5-pro'; })(),
   useTemperature: (localStorage.getItem('distillboard.useTemperature')||'false')==='true',
   temperature: +(localStorage.getItem('distillboard.temperature')||'1.0'),
   themeMode: (()=>{ const v=localStorage.getItem('distillboard.themeMode'); if(v==='light'||v==='dark'||v==='auto') return v; const legacy=localStorage.getItem('distillboard.dark'); if(legacy!==null) return legacy==='true'?'dark':'light'; return 'auto'; })(),
