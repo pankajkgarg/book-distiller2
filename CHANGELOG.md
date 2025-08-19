@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## 2025-08-19
+- Fix: only send "Next" on subsequent turns (no file reattachment); first turn still includes the uploaded file for context.
+- Fix: when a file URI becomes invalid, re-upload once and update prior history file parts to reference the new URI.
 - Refactor: extracted Gemini SDK wiring and retry/backoff logic into a new `gemini.js` service.
 - app state remains in `app.js`; it now delegates API calls to `gemini.js`.
 - Behavior preserved; retry UI (spinner/countdown) still updates via service callbacks.

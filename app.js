@@ -146,15 +146,33 @@ createApp({
       if(+this.budgetTime>0 && (Date.now()-this.startTime)/1000 > +this.budgetTime){ this.status='time budget reached'; toast('Time budget reached','warn'); break; }
       if(+this.budgetTokens>0 && this.tokenTally >= +this.budgetTokens){ this.status='token budget reached (est)'; toast('Token budget (estimated) reached','warn'); break; }
 
-      const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
-      const nextUser = createUserContent([ filePart, 'Next' ]);
+      // After the first turn, only send "Next"; do not reattach the file.
+      const nextUser = createUserContent([ 'Next' ]);
       const req = { model:this.model, contents:[...this.history, nextUser], tools: [], config: this.makeConfig() };
       const [resp, tries, err] = await this.gem.callWithRetries(req);
       if(err){
         if(String(err?.message)==='__aborted__') return;
         if(err?.error?.status==='FAILED_PRECONDITION' || /Unsupported file uri/i.test(String(err?.message||''))){
-          toast('File reference invalid; re-uploading once…','warn');
-          try{ this.uploadedFile = await this.gem.ai.files.upload({ file:this.fileBlob, config:{ displayName:this.fileBlob.name }}); }
+          toast('File reference invalid; re-uploading and updating history…','warn');
+          try{
+            // Re-upload file
+            this.uploadedFile = await this.gem.ai.files.upload({ file:this.fileBlob, config:{ displayName:this.fileBlob.name }});
+            // Update any prior file parts in history to point to the new URI
+            try{
+              for(const msg of this.history){
+                if(!msg || msg.role!=='user' || !Array.isArray(msg.parts)) continue;
+                for(const p of msg.parts){
+                  if(p && p.fileData){
+                    p.fileData.fileUri = this.uploadedFile.uri;
+                    if(this.uploadedFile.mimeType) p.fileData.mimeType = this.uploadedFile.mimeType;
+                  } else if(p && p.file_data){
+                    p.file_data.file_uri = this.uploadedFile.uri;
+                    if(this.uploadedFile.mimeType) p.file_data.mime_type = this.uploadedFile.mimeType;
+                  }
+                }
+              }
+            }catch{}
+          }
           catch(e){ this.finishWithError(err, req, tries); return; }
           continue; // retry next iteration
         }
