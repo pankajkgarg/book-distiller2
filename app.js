@@ -26,7 +26,7 @@ createApp({
   status: 'idle', sections: 0, tokenTally: 0,
   running: false, paused: false,
   history: [], lastAssistant: '',
-  fileBlob: null, fileInfo: '',
+  fileBlob: null, fileInfo: '', fileTokenEstimate: 0,
   trace: [],
   // retry/backoff UI state
   retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0,
@@ -44,7 +44,7 @@ createApp({
   // methods
   saveKey(){ const k=this.apiKey.trim(); if(!k){ toast('Empty key not saved','warn'); return; } localStorage.setItem('distillboard.gemini_key',k); toast('API key saved','good'); },
   clearKey(){ localStorage.removeItem('distillboard.gemini_key'); this.apiKey=''; toast('API key cleared','good'); },
-  onFileChange(e){ const f=e.target.files?.[0]; this.fileBlob=f||null; this.fileInfo = f? `${f.name} • ${(f.type||'').replace('application/','')} • ${(f.size/1048576).toFixed(2)} MB` : ''; },
+  onFileChange(e){ const f=e.target.files?.[0]; this.fileBlob=f||null; this.fileInfo = f? `${f.name} • ${(f.type||'').replace('application/','')} • ${(f.size/1048576).toFixed(2)} MB` : ''; this.fileTokenEstimate = f? Math.round(f.size/4) : 0; },
   toggleTrace(){ const t=$('#trace'); t.classList.toggle('open'); t?.setAttribute?.('aria-hidden', t.classList.contains('open')?'false':'true'); },
   openTrace(){ const t=$('#trace'); t.classList.add('open'); t?.setAttribute?.('aria-hidden','false'); },
   closeTrace(){ const t=$('#trace'); t.classList.remove('open'); t?.setAttribute?.('aria-hidden','true'); },
