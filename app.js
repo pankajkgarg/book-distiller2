@@ -1,5 +1,5 @@
 import { createApp } from 'https://unpkg.com/petite-vue?module';
-import { GoogleGenAI, createUserContent, createPartFromUri } from 'https://esm.run/@google/genai@0.14.1';
+import { createGeminiService, createUserContent, createPartFromUri } from './gemini.js';
 
 // Helpers
 const $ = s => document.querySelector(s);
@@ -36,7 +36,7 @@ createApp({
   useTemperature: (localStorage.getItem('distillboard.useTemperature')||'false')==='true',
   temperature: +(localStorage.getItem('distillboard.temperature')||'1.0'),
   themeMode: (()=>{ const v=localStorage.getItem('distillboard.themeMode'); if(v==='light'||v==='dark'||v==='auto') return v; const legacy=localStorage.getItem('distillboard.dark'); if(legacy!==null) return legacy==='true'?'dark':'light'; return 'auto'; })(),
-  ai: null, uploadedFile: null, startTime: 0,
+  gem: null, uploadedFile: null, startTime: 0,
 
   // computed
   get endMarkerEscaped(){ return this.endMarker.replace(/^<|>$/g,''); },
@@ -78,12 +78,22 @@ createApp({
     this.resetDoc(); this.history=[]; this.sections=0; this.tokenTally=0; this.lastAssistant=''; this.trace=[]; this.paused=false; this.running=false;
     this.status='uploading';
 
-    // init SDK
-    this.ai = new GoogleGenAI({ apiKey: this.apiKey.trim() });
+    // init Gemini service
+    this.gem = createGeminiService({
+      apiKey: this.apiKey.trim(),
+      shouldContinue: ()=> !this.paused && (this.running || true),
+      onTransient: async ({attempt, waitMs, err})=>{
+        this.retrying=true;
+        this.retryAttempt=attempt;
+        this.retryMax='∞';
+        this.lastErrorMessage = err?.error?.message || err?.message || 'Temporary error';
+        await this.backoffWait(waitMs);
+      }
+    });
 
     // upload via Files API and poll ACTIVE (with retries and RetryInfo)
     {
-      const [up, utries, uerr] = await this.callWithRetriesFn(()=>this.ai.files.upload({ file: this.fileBlob, config: { displayName: this.fileBlob.name } }));
+      const [up, utries, uerr] = await this.gem.callWithRetriesFn(()=>this.gem.ai.files.upload({ file: this.fileBlob, config: { displayName: this.fileBlob.name } }));
       if(uerr){
         if(String(uerr?.message)==='__aborted__') return;
         this.paused = true; this.status='paused (error)'; this.lastErrorMessage = uerr?.message||'unknown';
@@ -95,7 +105,7 @@ createApp({
       let tries=0;
       while(this.uploadedFile.state==='PROCESSING' && tries<120){
         await sleep(2000);
-        const [got, gtries, gerr] = await this.callWithRetriesFn(()=>this.ai.files.get({ name: this.uploadedFile.name }));
+        const [got, gtries, gerr] = await this.gem.callWithRetriesFn(()=>this.gem.ai.files.get({ name: this.uploadedFile.name }));
         if(gerr){
           if(String(gerr?.message)==='__aborted__') return;
           this.paused = true; this.status='paused (error)'; this.lastErrorMessage = gerr?.message||'unknown';
@@ -120,9 +130,9 @@ createApp({
     const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
     const userFirst = createUserContent([ filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.' ]);
     const req1 = { model: this.model, contents:[ userFirst ], config: this.makeConfig() };
-    const [resp1, r1tries, r1err] = await this.callWithRetries(req1);
+    const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
     if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
-    const text1 = resp1?.text || this.extractText(resp1);
+    const text1 = resp1?.text || this.gem.extractText(resp1);
     this.history.push(userFirst); this.history.push({role:'model', parts:[{text:text1}]});
     this.sections+=1; this.tokenTally+=estimateTokens(text1); this.appendDoc(text1);
     this.pushTrace({request:this.sanitize(req1), response:resp1, retries:r1tries});
@@ -139,18 +149,18 @@ createApp({
       const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
       const nextUser = createUserContent([ filePart, 'Next' ]);
       const req = { model:this.model, contents:[...this.history, nextUser], config: this.makeConfig() };
-      const [resp, tries, err] = await this.callWithRetries(req);
+      const [resp, tries, err] = await this.gem.callWithRetries(req);
       if(err){
         if(String(err?.message)==='__aborted__') return;
         if(err?.error?.status==='FAILED_PRECONDITION' || /Unsupported file uri/i.test(String(err?.message||''))){
           toast('File reference invalid; re-uploading once…','warn');
-          try{ this.uploadedFile = await this.ai.files.upload({ file:this.fileBlob, config:{ displayName:this.fileBlob.name }}); }
+          try{ this.uploadedFile = await this.gem.ai.files.upload({ file:this.fileBlob, config:{ displayName:this.fileBlob.name }}); }
           catch(e){ this.finishWithError(err, req, tries); return; }
           continue; // retry next iteration
         }
         this.finishWithError(err, req, tries); return;
       }
-      const text = resp?.text || this.extractText(resp);
+      const text = resp?.text || this.gem.extractText(resp);
       this.history.push(nextUser); this.history.push({role:'model', parts:[{text}]});
       this.sections+=1; this.tokenTally+=estimateTokens(text); this.appendDoc(text);
       this.pushTrace({request:this.sanitize(req), response:resp, retries:tries});
@@ -176,112 +186,12 @@ createApp({
   persist(){ try{ localStorage.setItem('distillboard.prompt', this.prompt||''); localStorage.setItem('distillboard.model', this.model||''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature??'')); localStorage.setItem('distillboard.themeMode', this.themeMode||'auto'); localStorage.removeItem('distillboard.dark'); }catch{} },
   serializeErr(e){ if(!e) return {message:'unknown'}; if(typeof e==='string') return {message:e}; return { message: e.message||'unknown', name:e.name||'Error', raw:e?.response||e?.toString?.() }; },
   pushTrace({request,response,error,retries}){ const ts=new Date().toISOString(); this.trace.push({ts,request,response,error,retries}); const card=el('div','item'); card.appendChild(el('div','',`<b>${error?'Error':'Turn'}</b> <span class=\"muted\" style=\"float:right\">${new Date().toLocaleTimeString()}</span>`)); const rq=el('div','pre'); rq.textContent=JSON.stringify(request,null,2); card.appendChild(el('div','muted','Request:')); card.appendChild(rq); if(response){ const rs=el('div','pre'); rs.textContent=JSON.stringify(response,null,2); card.appendChild(el('div','muted','Response:')); card.appendChild(rs);} if(error){ const er=el('div','pre'); er.textContent=JSON.stringify(error,null,2); card.appendChild(el('div','muted','Error:')); card.appendChild(er);} if(retries>0) card.appendChild(el('div','muted',`Retries: ${retries}`)); $('#traceList').prepend(card); },
-  extractText(resp){ const json=resp?.raw || resp; const c=json?.candidates?.[0]; const parts=c?.content?.parts||[]; return parts.map(p=>p.text||'').join(''); },
 
-  // SDK-aware retry helpers using structured code/status and RetryInfo
-  parseRetryDelay(err){
-    try{
-      // Prefer Google RetryInfo if present (can be string or {seconds,nanos})
-      const details = err?.error?.details || [];
-      const info = details.find(d=>d?.['@type']?.includes('google.rpc.RetryInfo'));
-      const rd = info?.retryDelay || info?.retry_delay;
-      if(rd){
-        if(typeof rd === 'object' && (rd.seconds!==undefined || rd.nanos!==undefined)){
-          const secs = Number(rd.seconds||0) + Number(rd.nanos||0)/1e9;
-          if(Number.isFinite(secs) && secs>=0) return Math.floor(secs*1000);
-        }
-        const m = String(rd).match(/([0-9]+(?:\.[0-9]+)?)s/i);
-        if(m) return Math.max(0, Math.floor(parseFloat(m[1])*1000));
-      }
-      // Fall back to HTTP Retry-After (seconds or HTTP-date)
-      const headers = (err?.response?.headers) || (err?.headers) || {};
-      const getHeader = (h)=> headers?.get ? headers.get(h) : (headers[h] || headers[h?.toLowerCase?.()] || headers[String(h).toLowerCase?.()] );
-      const ra = getHeader && (getHeader('retry-after') || getHeader('Retry-After'));
-      if(ra){
-        const secs = Number(ra);
-        if(Number.isFinite(secs)) return Math.max(0, Math.floor(secs*1000));
-        const when = Date.parse(String(ra));
-        if(!Number.isNaN(when)){
-          const ms = when - Date.now();
-          if(ms>0) return ms;
-        }
-      }
-      return null;
-    }catch{ return null; }
-  },
-  isTransient(err){
-    // Normalize a variety of possible code locations/types
-    const candidates = [
-      err?.error?.code,
-      err?.response?.status,
-      err?.status,
-      err?.statusCode,
-      err?.code,
-    ];
-    for(const c of candidates){
-      if(typeof c === 'number'){
-        if(c===429 || c===408 || c===425) return true;
-        if(c>=500 && c<600) return true;
-      }else if(typeof c === 'string' && c){
-        const n = Number(c);
-        if(Number.isFinite(n)){
-          if(n===429 || n===408 || n===425) return true;
-          if(n>=500 && n<600) return true;
-        }
-      }
-    }
-    const status = err?.error?.status || err?.statusText;
-    if(status==='RESOURCE_EXHAUSTED' || status==='INTERNAL' || status==='UNAVAILABLE' || status==='ABORTED') return true;
-    if(typeof navigator!=='undefined' && navigator.onLine===false) return true;
-    return false;
-  },
+  // backoff UI helper (retry timings are driven by gemini service via onTransient)
   async backoffWait(ms){
     this.retrying=true; this.retryMax='∞'; this.retryRemainingMs=ms;
     const step=250; let remain=ms;
     while(remain>0 && this.running && !this.paused){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
-  },
-  async callWithRetries(args){
-    let attempt=0, lastErr=null;
-    while(this.running && !this.paused){
-      try{ this.retrying=false; this.lastErrorMessage=''; const res = await this.ai.models.generateContent(args); return [res, attempt, null]; }
-      catch(err){
-        lastErr=err; const transient=this.isTransient(err);
-        if(transient){
-          const suggested=this.parseRetryDelay(err);
-          const base=Math.min(60000, 1000*Math.pow(2,attempt));
-          const fallback=Math.floor(base*(0.75+Math.random()*0.5));
-          const waitMs = suggested ?? fallback;
-          this.retryAttempt=attempt; this.lastErrorMessage=err?.error?.message || err?.message || 'Temporary error';
-          await this.backoffWait(waitMs);
-          if(!this.running || this.paused) break;
-          attempt++; continue;
-        }
-        return [null, attempt, err];
-      }
-    }
-    return [null, attempt, lastErr||new Error('__aborted__')];
-  },
-  async callWithRetriesFn(fn){
-    let attempt=0, lastErr=null;
-    // Allow use before running=true (upload phase), or during run if not paused
-    while(!this.running || (this.running && !this.paused)){
-      try{ this.retrying=false; this.lastErrorMessage=''; const res = await fn(); return [res, attempt, null]; }
-      catch(err){
-        lastErr=err; const transient=this.isTransient(err);
-        if(transient){
-          const suggested=this.parseRetryDelay(err);
-          const base=Math.min(60000, 1000*Math.pow(2,attempt));
-          const fallback=Math.floor(base*(0.75+Math.random()*0.5));
-          const waitMs = suggested ?? fallback;
-          this.retryAttempt=attempt; this.lastErrorMessage=err?.error?.message || err?.message || 'Temporary error';
-          await this.backoffWait(waitMs);
-          if(this.paused) break;
-          attempt++; continue;
-        }
-        return [null, attempt, err];
-      }
-    }
-    return [null, attempt, lastErr||new Error('__aborted__')];
   },
 
   async postTurnChecks(text){
