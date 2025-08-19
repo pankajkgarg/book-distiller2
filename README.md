@@ -40,6 +40,10 @@ A tiny client‑side app that uploads a book (PDF/EPUB) and iteratively distills
 
 See `CHANGELOG.md` for notable changes.
 
+## Contributing
+
+Please see `AGENTS.md` for a brief checklist (remember to update the changelog for user‑facing changes).
+
 ## Deploy to GitHub Pages
 
 This is a static site. The included GitHub Actions workflow publishes it to GitHub Pages on every push to `main`.
