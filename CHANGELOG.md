@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## 2025-08-19
+- Feat: export filenames now use `<Book Name> - book excerpt.(md|txt|pdf)` and include metadata (model, temperature, sections; front matter in `.md`, header in `.txt`, and PDF document properties in `.pdf`).
 - Docs: added `docs/WORKFLOW.md` documenting the full runtime workflow, retries, and invalid file URI recovery; referenced from code and README.
 - Fix: only send "Next" on subsequent turns (no file reattachment); first turn still includes the uploaded file for context.
 - Fix: when a file URI becomes invalid, re-upload once and update prior history file parts to reference the new URI.

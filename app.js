@@ -11,7 +11,15 @@ function sim3(a,b){ const grams=s=>{const t=(s||'').toLowerCase().replace(/\s+/g
 function toast(msg,type='info',ms=3500){ const host=$('#toasts'); const n=el('div',`toast ${type}`,msg); host.appendChild(n); setTimeout(()=>n.remove(),ms);} 
 function stripMd(md){ return (md||'').replace(/[>#*_`~\-]+/g,'').replace(/\n{3,}/g,'\n\n'); }
 function download(name, text, type='text/plain;charset=utf-8'){ const blob=new Blob([text],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
-function makePdf(name, md, trace){ const { jsPDF } = window.jspdf; const doc=new jsPDF({unit:'pt',format:'a4'}); const margin=56,width=483; const lines=(stripMd(md)||'(empty)').split('\n'); let y=margin; doc.setFont('Times','Normal'); doc.setFontSize(12); for(const line of lines){ const chunk=doc.splitTextToSize(line,width); if(y+chunk.length*16>812){ doc.addPage(); y=margin;} doc.text(chunk,margin,y); y+=chunk.length*16+4; } if(trace){ doc.addPage(); doc.setFontSize(11); const t=JSON.stringify(trace,null,2).split('\n'); let yy=margin; for(const row of t){ const chunk=doc.splitTextToSize(row,width); if(yy+chunk.length*14>812){ doc.addPage(); yy=margin;} doc.text(chunk,margin,yy); yy+=chunk.length*14+2; } } doc.save(name); }
+function makePdf(name, md, trace, meta){ const { jsPDF } = window.jspdf; const doc=new jsPDF({unit:'pt',format:'a4'});
+  try{
+    const props={ title: name.replace(/\.[^.]+$/, ''), subject:'Book excerpt', keywords: (meta? `Gemini, ${meta.model||''}`:''), creator:'book-distiller-petite-vue' };
+    doc.setProperties && doc.setProperties(props);
+  }catch{}
+  const margin=56,width=483; const lines=(stripMd(md)||'(empty)').split('\n'); let y=margin; doc.setFont('Times','Normal'); doc.setFontSize(12);
+  for(const line of lines){ const chunk=doc.splitTextToSize(line,width); if(y+chunk.length*16>812){ doc.addPage(); y=margin;} doc.text(chunk,margin,y); y+=chunk.length*16+4; }
+  if(trace){ doc.addPage(); doc.setFontSize(11); const t=JSON.stringify(trace,null,2).split('\n'); let yy=margin; for(const row of t){ const chunk=doc.splitTextToSize(row,width); if(yy+chunk.length*14>812){ doc.addPage(); yy=margin;} doc.text(chunk,margin,yy); yy+=chunk.length*14+2; } }
+  doc.save(name); }
 
 const DEFAULT_PROMPT = `# Book Deep-Dive Exploration Prompt\n\n**Your Mission:** You are tasked with creating an immersive, in-depth exploration of a book I provide. Your goal is to channel the author's voice and produce a series of thematic deep-dives that, when combined, will read as a single, flowing document—like an extended meditation on the book written by the author themselves.\n\n## For the First Response Only\n\n**Structure your first response in two parts:**\n\n### Part 1: Opening the Journey\n- **Book Introduction**: In the author's voice, introduce the book's core premise and why it was written\n- **The Architecture**: Present a roadmap of all major themes/sections that will be covered across our multi-turn exploration, showing how each builds upon the last\n- **Reading Guide**: Briefly explain how these sections work together to form the complete journey\n\n### Part 2: First Thematic Section\n- Proceed with the first major theme following the standard section structure below\n\n## For All Thematic Sections\n\n**Creating Each Section:**\nBegin each section with a **thematic title** that captures the essence of what you're exploring.\n\n## Our Process\n- I'll provide the book source\n- You'll create the first response with both the opening journey overview and the first thematic section\n- When I respond with "Next", identify the next logical theme and create another complete section\n- Each new section should begin in a way that flows naturally from the previous section\n- When you've covered all major themes and the book's journey is complete, respond only with: \`<end_of_book>\`\n\n## Key Principles\n- **The reader should feel they've read the book itself through your responses**\n- Privilege completeness and depth over conciseness\n- Think of the final combined document as the book's essence, distilled but not diluted\n\n## Remember\nYou're not summarizing or studying the book—you're presenting it in its full richness through the author's own eyes. The reader should finish feeling like they've genuinely experienced the book's complete content, receiving all its wisdom, stories, and insights directly from the source material itself.`;
 
@@ -54,9 +62,40 @@ createApp({
   openInfo(){ $('#infoModal').showModal(); },
   onThemeChange(){ this.applyTheme(); this.persist(); toast('Theme: '+this.themeMode,'info'); },
   async copyAll(){ const text=this.combinedText(); try{ await navigator.clipboard.writeText(text); toast('Copied combined text','good'); }catch{ download('distillation.txt', text); } },
-  exportMd(){ download('distillation.md', this.combinedText(), 'text/markdown;charset=utf-8'); },
-  exportTxt(){ download('distillation.txt', this.combinedText()); },
-  exportPdf(){ const include = $('#includeTrace').checked ? this.trace : null; makePdf('distillation.pdf', this.combinedText(), include); },
+  // Export helpers: filename + metadata
+  sanitizeFilename(name){ return String(name||'').replace(/[\\\/:*?"<>|]+/g,'-').replace(/\s+/g,' ').trim(); },
+  bookBaseName(){
+    const fallback='Distillation';
+    try{
+      if(this.fileBlob && this.fileBlob.name){ return this.fileBlob.name.replace(/\.[^.]+$/, ''); }
+    }catch{}
+    return fallback;
+  },
+  exportBase(){ return this.sanitizeFilename(`${this.bookBaseName()} - book excerpt`); },
+  exportMeta(){
+    const createdAt=new Date().toISOString();
+    return {
+      title: `${this.bookBaseName()} - book excerpt`,
+      source: this.fileBlob?.name||'',
+      model: this.model,
+      temperature: this.useTemperature ? Number(this.temperature) : '(default)',
+      sections: Number(this.sections)||0,
+      createdAt
+    };
+  },
+  metadataFrontMatter(){ const m=this.exportMeta(); return `---\n`+
+    `title: ${m.title}\n`+
+    (m.source? `source_file: ${m.source}\n`: '')+
+    `model: ${m.model}\n`+
+    `temperature: ${m.temperature}\n`+
+    `sections: ${m.sections}\n`+
+    `date: ${m.createdAt}\n`+
+    `generator: book-distiller-petite-vue\n`+
+    `---\n\n`; },
+  metadataTextHeader(){ const m=this.exportMeta(); const lines=[]; lines.push(`${m.title}`); if(m.source) lines.push(`Source: ${m.source}`); lines.push(`Model: ${m.model}`); lines.push(`Temperature: ${m.temperature}`); lines.push(`Sections: ${m.sections}`); lines.push(`Date: ${m.createdAt}`); lines.push(''); return lines.join('\n'); },
+  exportMd(){ const name=`${this.exportBase()}.md`; const body=this.combinedText(); download(name, this.metadataFrontMatter()+body, 'text/markdown;charset=utf-8'); },
+  exportTxt(){ const name=`${this.exportBase()}.txt`; const body=this.combinedText(); download(name, this.metadataTextHeader()+body); },
+  exportPdf(){ const include = $('#includeTrace').checked ? this.trace : null; const name=`${this.exportBase()}.pdf`; makePdf(name, this.combinedText(), include, this.exportMeta()); },
 
   combinedText(){ return this.history.filter(h=>h.role==='model').map(h=>h.parts.map(p=>p.text||'').join('')).join('\n\n').trim(); },
   getTitleFromMd(md){

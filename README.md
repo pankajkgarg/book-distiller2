@@ -27,6 +27,14 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
 - External libs (Petite‑Vue, @google/genai, marked, jsPDF) are loaded from CDNs.
 - Requests explicitly omit search tools so Gemini responds without Google Search grounding.
 
+## Export
+
+- Filenames: exports use `<Book Name> - book excerpt.(md|txt|pdf)`, where `Book Name` is derived from the uploaded file’s name.
+- Metadata:
+  - `.md`: YAML front matter with `title`, `source_file`, `model`, `temperature`, `sections`, `date`, and `generator`.
+  - `.txt`: A simple header with the same fields at the top of the file.
+  - `.pdf`: PDF document properties are set (title, subject, keywords, creator). The content remains the distilled text; properties carry the metadata.
+
 ## Troubleshooting
 
 - If you open `index.html` via `file://`, browsers block ESM scripts (CORS). Use the dev server (`npm run dev`) or any static server (e.g., `python3 -m http.server`).
