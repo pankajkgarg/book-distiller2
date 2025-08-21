@@ -38,7 +38,7 @@ createApp({
   fileBlob: null, fileInfo: '', fileTokenEstimate: 0,
   trace: [],
   // retry/backoff UI state
-  retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0,
+  retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0, retryPlannedMs: 0,
   lastErrorMessage: '',
 
   model: (()=>{ const allowed=['gemini-2.5-pro','gemini-2.5-flash','gemini-2.5-flash-lite']; const saved=localStorage.getItem('distillboard.model'); return allowed.includes(saved)?saved:'gemini-2.5-pro'; })(),
@@ -123,11 +123,30 @@ createApp({
       apiKey: this.apiKey.trim(),
       shouldContinue: ()=> !this.paused && (this.running || true),
       onTransient: async ({attempt, waitMs, err})=>{
-        this.retrying=true;
-        this.retryAttempt=attempt;
-        this.retryMax='∞';
+        // Determine status code if present
+        const rawCode = (err?.error?.code ?? err?.response?.status ?? err?.status ?? err?.statusCode ?? err?.code);
+        const code = Number(rawCode);
+        const isRateOrServer = Number.isFinite(code) && (code===429 || (code>=500 && code<600));
+
+        // Policy: for 429/5xx, use fixed 60s retry and cap at 5 attempts
+        const MAX_AUTO_RETRIES = 5;
+        const plannedWait = isRateOrServer ? 60000 : waitMs;
+
+        this.retrying = true;
+        this.retryAttempt = attempt;
+        this.retryMax = isRateOrServer ? MAX_AUTO_RETRIES : '∞';
         this.lastErrorMessage = err?.error?.message || err?.message || 'Temporary error';
-        await this.backoffWait(waitMs);
+
+        // If we already reached the cap, pause and surface Resume
+        if(isRateOrServer && (attempt+1) >= MAX_AUTO_RETRIES){
+          this.retrying = false;
+          this.paused = true;
+          this.status = 'paused (auto-retry limit reached)';
+          toast('Auto-retry limit reached. Click Resume to continue.','warn',7000);
+          return; // stop waiting; shouldContinue() becomes false and aborts the loop
+        }
+
+        await this.backoffWait(plannedWait);
       }
     });
 
@@ -249,7 +268,7 @@ createApp({
 
   // backoff UI helper (retry timings are driven by gemini service via onTransient)
   async backoffWait(ms){
-    this.retrying=true; this.retryMax='∞'; this.retryRemainingMs=ms;
+    this.retrying=true; this.retryMax='∞'; this.retryRemainingMs=ms; this.retryPlannedMs=ms;
     const step=250; let remain=ms;
     while(remain>0 && this.running && !this.paused){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
   },

@@ -28,7 +28,8 @@ This document is the authoritative description of how the app orchestrates Gemin
 
 ## Error Handling and Retries
 
-- Transient errors (429/5xx/Retry‑After/RetryInfo/offline): Automatically retried with exponential backoff + jitter. UI shows attempt and countdown.
+- 429 and 5xx: Automatically retried with a fixed 60s wait and visible countdown, up to 5 attempts. After 5 failed attempts, the run pauses and shows a Resume button.
+- Other transient conditions (Retry‑After/RetryInfo/network/offline): Automatically retried with exponential backoff + jitter. UI shows attempt and countdown.
 - Non‑transient errors: The app pauses the run with status `paused (error)`, surfaces `lastErrorMessage`, and logs the failing request/error in `trace`.
 - Abort semantics: If paused while waiting to retry, the in‑flight operation aborts; no history mutations are made for the failed turn.
 
@@ -89,4 +90,3 @@ Rationale
   - Pause/stop/completion criteria or budgets
   - State/history semantics
   …then update this document and reference the PR in `CHANGELOG.md`.
-
