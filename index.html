@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="./styles.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body>
   <div class="topbar">
@@ -165,6 +166,7 @@
             <button type="button" class="btn" @click="exportMd">.md</button>
             <button type="button" class="btn" @click="exportTxt">.txt</button>
             <button type="button" class="btn" @click="exportPdf">.pdf</button>
+            <button type="button" class="btn" @click="exportEpub">.epub</button>
             <button id="btnCloseExport" class="btn">Close</button>
           </div>
         </div>
@@ -182,7 +184,7 @@
           <ul class="muted" style="margin:0 0 12px 18px">
             <li>Petite‑Vue for UI reactivity</li>
             <li>Google Gemini SDK (@google/genai)</li>
-            <li>Marked for Markdown → HTML, jsPDF for PDF export</li>
+            <li>Marked for Markdown → HTML, jsPDF for PDF export, JSZip for EPUB export</li>
           </ul>
           <div style="font-weight:600;margin:8px 0 6px">Recreate this with GPT‑5 (or latest)</div>
           <div class="muted">

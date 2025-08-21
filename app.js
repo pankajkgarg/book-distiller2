@@ -96,6 +96,18 @@ createApp({
   exportMd(){ const name=`${this.exportBase()}.md`; const body=this.combinedText(); download(name, this.metadataFrontMatter()+body, 'text/markdown;charset=utf-8'); },
   exportTxt(){ const name=`${this.exportBase()}.txt`; const body=this.combinedText(); download(name, this.metadataTextHeader()+body); },
   exportPdf(){ const include = $('#includeTrace').checked ? this.trace : null; const name=`${this.exportBase()}.pdf`; makePdf(name, this.combinedText(), include, this.exportMeta()); },
+  exportEpub(){
+    const name=`${this.exportBase()}.epub`;
+    const meta=this.exportMeta();
+    const zip=new JSZip();
+    zip.file('mimetype','application/epub+zip',{compression:'STORE'});
+    zip.folder('META-INF').file('container.xml','<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
+    const oebps=zip.folder('OEBPS');
+    oebps.file('content.opf',`<?xml version="1.0" encoding="UTF-8"?><package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">id</dc:identifier><dc:title>${meta.title}</dc:title><dc:language>en</dc:language><dc:creator>book-distiller-petite-vue</dc:creator><meta property="dcterms:modified">${meta.createdAt}</meta></metadata><manifest><item id="content" href="Text/content.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="content"/></spine></package>`);
+    const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    oebps.folder('Text').file('content.xhtml',`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${meta.title}</title></head><body><pre>${esc(this.combinedText())}</pre></body></html>`);
+    zip.generateAsync({type:'blob'}).then(b=>{const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); URL.revokeObjectURL(a.href);});
+  },
 
   combinedText(){ return this.history.filter(h=>h.role==='model').map(h=>h.parts.map(p=>p.text||'').join('')).join('\n\n').trim(); },
   getTitleFromMd(md){
