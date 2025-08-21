@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## 2025-08-21
 - feat: auto-retry 429 and 5xx with a fixed 60s wait and visible countdown; only pause and show “Resume” after 5 failed attempts.
 - docs: clarify retry behavior in README (fixed 60s for 429/5xx with 5 attempts; exponential for others).
+ - ui: top status uses colored badge + spinner; end marker hidden from top.
+ - ui: left pane simplified into steps (API key → Model → Upload → Prompt); Temperature moved under Advanced.
+ - ux: temperature now enabled by default at 1.0.
+ - ux: remove misleading token estimate on upload.
+ - feat: short/empty responses now auto-retry up to 5 times with a 60s countdown before pausing.
+ - feat: allow deleting any generated section; deletion also removes the corresponding user/model messages from history so future turns exclude it.
 
 ## 2025-08-19
 - Feat: export filenames now use `<Book Name> - book excerpt.(md|txt|pdf)` and include metadata (model, temperature, sections; front matter in `.md`, header in `.txt`, and PDF document properties in `.pdf`).

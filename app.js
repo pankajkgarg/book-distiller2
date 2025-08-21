@@ -35,17 +35,21 @@ createApp({
   status: 'idle', sections: 0, tokenTally: 0,
   running: false, paused: false,
   history: [], lastAssistant: '',
-  fileBlob: null, fileInfo: '', fileTokenEstimate: 0,
+  fileBlob: null, fileInfo: '',
   trace: [],
   // retry/backoff UI state
   retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0, retryPlannedMs: 0,
   lastErrorMessage: '',
 
   model: (()=>{ const allowed=['gemini-2.5-pro','gemini-2.5-flash','gemini-2.5-flash-lite']; const saved=localStorage.getItem('distillboard.model'); return allowed.includes(saved)?saved:'gemini-2.5-pro'; })(),
-  useTemperature: (localStorage.getItem('distillboard.useTemperature')||'false')==='true',
+  useTemperature: (()=>{ const v=localStorage.getItem('distillboard.useTemperature'); return (v===null)? true : (v==='true'); })(),
   temperature: +(localStorage.getItem('distillboard.temperature')||'1.0'),
   themeMode: (()=>{ const v=localStorage.getItem('distillboard.themeMode'); if(v==='light'||v==='dark'||v==='auto') return v; const legacy=localStorage.getItem('distillboard.dark'); if(legacy!==null) return legacy==='true'?'dark':'light'; return 'auto'; })(),
   gem: null, uploadedFile: null, startTime: 0,
+  // section bookkeeping
+  nextSectionId: 1,
+  sectionsMeta: [],
+  anomalyRetryCount: 0,
 
   // computed
   get endMarkerEscaped(){ return this.endMarker.replace(/^<|>$/g,''); },
@@ -53,7 +57,7 @@ createApp({
   // methods
   saveKey(){ const k=this.apiKey.trim(); if(!k){ toast('Empty key not saved','warn'); return; } localStorage.setItem('distillboard.gemini_key',k); toast('API key saved','good'); },
   clearKey(){ localStorage.removeItem('distillboard.gemini_key'); this.apiKey=''; toast('API key cleared','good'); },
-  onFileChange(e){ const f=e.target.files?.[0]; this.fileBlob=f||null; this.fileInfo = f? `${f.name} • ${(f.type||'').replace('application/','')} • ${(f.size/1048576).toFixed(2)} MB` : ''; this.fileTokenEstimate = f? Math.round(f.size/4) : 0; },
+  onFileChange(e){ const f=e.target.files?.[0]; this.fileBlob=f||null; this.fileInfo = f? `${f.name} • ${(f.type||'').replace('application/','')} • ${(f.size/1048576).toFixed(2)} MB` : ''; },
   toggleTrace(){ const t=$('#trace'); t.classList.toggle('open'); t?.setAttribute?.('aria-hidden', t.classList.contains('open')?'false':'true'); },
   openTrace(){ const t=$('#trace'); t.classList.add('open'); t?.setAttribute?.('aria-hidden','false'); },
   closeTrace(){ const t=$('#trace'); t.classList.remove('open'); t?.setAttribute?.('aria-hidden','true'); },
@@ -106,7 +110,9 @@ createApp({
     }
     return `Section ${this.sections+1}`;
   },
-  appendDoc(md){ const host=$('#liveDoc'); if(host.firstElementChild && host.firstElementChild.classList.contains('muted')) host.innerHTML=''; const container=el('div','section'); const head=el('div','sectionHead'); const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(md)}`); head.appendChild(title); container.appendChild(head); const body=el('div','sectionBody'); const prose=el('div','prose'); prose.innerHTML=window.marked.parse(md||''); body.appendChild(prose); container.appendChild(body); host.appendChild(container); host.scrollTo({top: host.scrollHeight, behavior:'smooth'}); },
+  appendDoc(md, sid){ const host=$('#liveDoc'); if(host.firstElementChild && host.firstElementChild.classList.contains('muted')) host.innerHTML=''; const container=el('div','section'); container.dataset.sid=String(sid); const head=el('div','sectionHead'); const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(md)}`); const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(sid); head.appendChild(title); head.appendChild(delBtn); container.appendChild(head); const body=el('div','sectionBody'); const prose=el('div','prose'); prose.innerHTML=window.marked.parse(md||''); body.appendChild(prose); container.appendChild(body); host.appendChild(container); host.scrollTo({top: host.scrollHeight, behavior:'smooth'}); },
+  rebuildDoc(){ const host=$('#liveDoc'); host.innerHTML=''; if(this.sectionsMeta.length===0){ host.innerHTML='<div class="muted">Output will appear here…</div>'; this.sections=0; this.tokenTally=0; return; } this.sections=0; this.tokenTally=0; for(const [i,meta] of this.sectionsMeta.entries()){ this.sections=i+1; this.tokenTally+=estimateTokens(meta.text||''); const container=el('div','section'); container.dataset.sid=String(meta.id); const head=el('div','sectionHead'); const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(meta.text)}`); const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(meta.id); head.appendChild(title); head.appendChild(delBtn); container.appendChild(head); const body=el('div','sectionBody'); const prose=el('div','prose'); prose.innerHTML=window.marked.parse(meta.text||''); body.appendChild(prose); container.appendChild(body); host.appendChild(container);} },
+  deleteSection(id){ const idx=this.sectionsMeta.findIndex(s=>s.id===id); if(idx===-1){ toast('Section not found','warn'); return; } const meta=this.sectionsMeta[idx]; try{ const mi=this.history.indexOf(meta.modelMsg); if(mi>=0) this.history.splice(mi,1); if(meta.userMsgBefore && Array.isArray(meta.userMsgBefore.parts)){ const isNextOnly = meta.userMsgBefore.parts.length===1 && (meta.userMsgBefore.parts[0]?.text||'')==='Next'; if(isNextOnly){ const ui=this.history.indexOf(meta.userMsgBefore); if(ui>=0) this.history.splice(ui,1); } } }catch{} this.sectionsMeta.splice(idx,1); this.rebuildDoc(); toast('Section deleted','good'); },
   resetDoc(){ $('#liveDoc').innerHTML='<div class="muted">Output will appear here…</div>'; },
 
   async start(){
@@ -115,7 +121,7 @@ createApp({
     if(!this.prompt.trim()){ toast('Prompt is empty','bad'); return; }
 
     // reset
-    this.resetDoc(); this.history=[]; this.sections=0; this.tokenTally=0; this.lastAssistant=''; this.trace=[]; this.paused=false; this.running=false;
+    this.resetDoc(); this.history=[]; this.sections=0; this.tokenTally=0; this.lastAssistant=''; this.trace=[]; this.paused=false; this.running=false; this.sectionsMeta=[]; this.nextSectionId=1; this.anomalyRetryCount=0;
     this.status='uploading';
 
     // init Gemini service
@@ -192,8 +198,11 @@ createApp({
     const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
     if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
     const text1 = resp1?.text || this.gem.extractText(resp1);
-    this.history.push(userFirst); this.history.push({role:'model', parts:[{text:text1}]});
-    this.sections+=1; this.tokenTally+=estimateTokens(text1); this.appendDoc(text1);
+    const modelMsg1 = {role:'model', parts:[{text:text1}]};
+    this.history.push(userFirst); this.history.push(modelMsg1);
+    const sid1 = this.nextSectionId++;
+    this.sectionsMeta.push({ id: sid1, text: text1, modelMsg: modelMsg1, userMsgBefore: userFirst });
+    this.sections+=1; this.tokenTally+=estimateTokens(text1); this.appendDoc(text1, sid1);
     this.pushTrace({request:this.sanitize(req1), response:resp1, retries:r1tries});
     const done = await this.postTurnChecks(text1); if(done){ this.cleanFinish(); return; }
     this.nextLoop();
@@ -240,8 +249,11 @@ createApp({
         this.finishWithError(err, req, tries); return;
       }
       const text = resp?.text || this.gem.extractText(resp);
-      this.history.push(nextUser); this.history.push({role:'model', parts:[{text}]});
-      this.sections+=1; this.tokenTally+=estimateTokens(text); this.appendDoc(text);
+      const modelMsg = {role:'model', parts:[{text}]};
+      this.history.push(nextUser); this.history.push(modelMsg);
+      const sid = this.nextSectionId++;
+      this.sectionsMeta.push({ id: sid, text, modelMsg, userMsgBefore: nextUser });
+      this.sections+=1; this.tokenTally+=estimateTokens(text); this.appendDoc(text, sid);
       this.pushTrace({request:this.sanitize(req), response:resp, retries:tries});
       const done = await this.postTurnChecks(text); if(done) break;
     }
@@ -278,10 +290,26 @@ createApp({
     if(re.test((text||'').trim())){ this.status='complete'; toast('Distillation complete','good'); return true; }
     if(this.pauseOnAnomaly){
       if(/^\s*(i\s+(can\'t|cannot|won\'t)|as an ai|i\'m unable|i do not have access)/i.test(text||'')){ this.paused=true; this.status='paused (refusal)'; toast('Paused: likely refusal','warn'); return true; }
-      if(((text||'').trim().replace(/```[\s\S]*?```/g,'').length)<200){ this.paused=true; this.status='paused (empty/short)'; toast('Paused: response too short','warn'); return true; }
+      // Short/empty: auto-retry up to 5 times with 60s countdown, then pause
+      const nonCode = (text||'').trim().replace(/```[\s\S]*?```/g,'');
+      if(nonCode.length<200){
+        const MAX = 5;
+        if(this.anomalyRetryCount < MAX){
+          this.status = 'retrying (short output)';
+          this.retryAttempt = this.anomalyRetryCount;
+          this.retryMax = MAX;
+          this.lastErrorMessage = 'Short/empty response';
+          await this.backoffWait(60000);
+          this.retrying=false;
+          this.anomalyRetryCount++;
+          return false;
+        }
+        this.anomalyRetryCount=0;
+        this.paused=true; this.status='paused (empty/short)'; toast('Paused: response too short','warn'); return true;
+      }
       if(sim3(this.lastAssistant, text)>0.9){ this.paused=true; this.status='paused (loop)'; toast('Paused: response repeating','warn'); return true; }
     }
-    this.lastAssistant = text; return false;
+    this.anomalyRetryCount=0; this.lastAssistant = text; return false;
   },
 
   cleanFinish(){ this.running=false; this.retrying=false; if(this.status==='running') this.status='stopped'; },

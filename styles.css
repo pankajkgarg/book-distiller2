@@ -31,6 +31,7 @@ textarea{min-height:180px;resize:vertical;font-family:ui-monospace,SFMono-Regula
 .section .sectionBody{padding:10px}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:var(--surface-alt);color:var(--muted);font-size:12px}
 .spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin 1s linear infinite}
+.spinner.sm{width:12px;height:12px;border-width:2px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .trace{position:fixed;right:0;top:0;height:100vh;width:min(520px,100%);background:var(--surface);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .25s ease;display:flex;flex-direction:column}
 .trace.open{transform:none}
@@ -52,3 +53,10 @@ body.dark{--bg:#0b1020;--surface:#0f172a;--surface-alt:#0b1422;--fg:#e2e8f0;--mu
 
 /* Screen-reader only text */
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Status badge */
+.status-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:var(--surface-alt);color:var(--muted);font-size:12px}
+.status-badge.running{border-color:var(--accent);color:var(--accent)}
+.status-badge.good{border-color:#16a34a;color:#16a34a}
+.status-badge.warn{border-color:#d97706;color:#d97706}
+.status-badge.bad{border-color:#dc2626;color:#dc2626}

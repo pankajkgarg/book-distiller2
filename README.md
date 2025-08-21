@@ -26,6 +26,12 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
 - Model, prompt, and generation temperature persist in `localStorage` as well.
 - External libs (Petite‑Vue, @google/genai, marked, jsPDF) are loaded from CDNs.
 - Requests explicitly omit search tools so Gemini responds without Google Search grounding.
+- Left pane is simplified into clear steps:
+  - Step 1 — enter your Gemini API key
+  - Step 2 — choose a model
+  - Step 3 — upload your book (PDF/EPUB)
+  - Step 4 — edit the prompt
+  - Advanced (collapsed): temperature (enabled by default at 1.0), end marker, budgets, anomaly pause toggle
 
 ## Export
 
@@ -42,6 +48,13 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
 - Transient API errors auto‑retry with clear feedback:
   - 429 and 5xx: fixed 60s waits with a visible countdown, up to 5 automatic attempts; after that, the run pauses and shows “Resume”.
   - Network/other transient conditions: exponential backoff with a visible countdown.
+
+## UI Changes
+
+- Top status now shows a colored badge and spinner while running.
+- End marker is moved to Advanced settings and removed from the top bar.
+- The rough token estimate after upload has been removed.
+- You can delete any generated section; it is removed from both the live document and the conversation history used for the next turn.
 
 ## Folder Layout
 
