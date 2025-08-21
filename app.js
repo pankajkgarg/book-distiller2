@@ -66,6 +66,8 @@ createApp({
   openInfo(){ $('#infoModal').showModal(); },
   onThemeChange(){ this.applyTheme(); this.persist(); toast('Theme: '+this.themeMode,'info'); },
   async copyAll(){ const text=this.combinedText(); try{ await navigator.clipboard.writeText(text); toast('Copied combined text','good'); }catch{ download('distillation.txt', text); } },
+  // Helper: detect artifact leak token in output
+  hasCtrlLeak(text){ return /<ctrl94>/i.test(String(text||'')); },
   // Export helpers: filename + metadata
   sanitizeFilename(name){ return String(name||'').replace(/[\\\/:*?"<>|]+/g,'-').replace(/\s+/g,' ').trim(); },
   bookBaseName(){
@@ -195,16 +197,37 @@ createApp({
     const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
     const userFirst = createUserContent([ filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.' ]);
     const req1 = { model: this.model, contents:[ userFirst ], tools: [], config: this.makeConfig() };
-    const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
-    if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
-    const text1 = resp1?.text || this.gem.extractText(resp1);
-    const modelMsg1 = {role:'model', parts:[{text:text1}]};
+    let firstResp=null, firstTries=0, firstText='';
+    for(let contentAttempts=0;;){
+      const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
+      if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
+      const text1 = resp1?.text || this.gem.extractText(resp1);
+      const nonCode = (text1||'').trim().replace(/```[\s\S]*?```/g,'');
+      const tooShort = nonCode.length<200;
+      const leak = this.hasCtrlLeak(text1);
+      if(leak || (tooShort && this.pauseOnAnomaly)){
+        if(contentAttempts<5){
+          const reason = leak? 'artifact leak (<ctrl94>)' : 'Short/empty response';
+          this.status = `retrying (${reason})`;
+          this.retryAttempt = contentAttempts;
+          this.retryMax = 5;
+          this.lastErrorMessage = reason;
+          await this.backoffWait(60000); this.retrying=false; continue;
+        } else {
+          this.paused=true; this.status= leak? 'paused (artifact leak)' : 'paused (empty/short)';
+          toast(leak? 'Paused: artifact leak detected' : 'Paused: response too short','warn');
+          return;
+        }
+      }
+      firstResp=resp1; firstTries=r1tries; firstText=text1; break;
+    }
+    const modelMsg1 = {role:'model', parts:[{text:firstText}]};
     this.history.push(userFirst); this.history.push(modelMsg1);
     const sid1 = this.nextSectionId++;
-    this.sectionsMeta.push({ id: sid1, text: text1, modelMsg: modelMsg1, userMsgBefore: userFirst });
-    this.sections+=1; this.tokenTally+=estimateTokens(text1); this.appendDoc(text1, sid1);
-    this.pushTrace({request:this.sanitize(req1), response:resp1, retries:r1tries});
-    const done = await this.postTurnChecks(text1); if(done){ this.cleanFinish(); return; }
+    this.sectionsMeta.push({ id: sid1, text: firstText, modelMsg: modelMsg1, userMsgBefore: userFirst });
+    this.sections+=1; this.tokenTally+=estimateTokens(firstText); this.appendDoc(firstText, sid1);
+    this.pushTrace({request:this.sanitize(req1), response:firstResp, retries:firstTries});
+    const done = await this.postTurnChecks(firstText); if(done){ this.cleanFinish(); return; }
     this.nextLoop();
   },
 
@@ -218,37 +241,44 @@ createApp({
       // See docs/WORKFLOW.md → Turn Structure
       const nextUser = createUserContent([ 'Next' ]);
       const req = { model:this.model, contents:[...this.history, nextUser], tools: [], config: this.makeConfig() };
-      const [resp, tries, err] = await this.gem.callWithRetries(req);
-      if(err){
-        if(String(err?.message)==='__aborted__') return;
-        if(err?.error?.status==='FAILED_PRECONDITION' || /Unsupported file uri/i.test(String(err?.message||''))){
-          // See docs/WORKFLOW.md → Invalid File Reference Recovery
-          toast('File reference invalid; re-uploading and updating history…','warn');
-          try{
-            // Re-upload file
-            this.uploadedFile = await this.gem.ai.files.upload({ file:this.fileBlob, config:{ displayName:this.fileBlob.name }});
-            // Update any prior file parts in history to point to the new URI
+      let resp=null, tries=0;
+      for(let contentAttempts=0;;){
+        const out = await this.gem.callWithRetries(req).catch(e=>[null,0,e]);
+        const r = Array.isArray(out)? out : [null,0,new Error('unknown')];
+        const [rresp, rtries, rerr] = r;
+        if(rerr){
+          if(String(rerr?.message)==='__aborted__') return;
+          if(rerr?.error?.status==='FAILED_PRECONDITION' || /Unsupported file uri/i.test(String(rerr?.message||''))){
+            // Invalid File Reference Recovery
+            toast('File reference invalid; re-uploading and updating history…','warn');
             try{
-              for(const msg of this.history){
-                if(!msg || msg.role!=='user' || !Array.isArray(msg.parts)) continue;
-                for(const p of msg.parts){
-                  if(p && p.fileData){
-                    p.fileData.fileUri = this.uploadedFile.uri;
-                    if(this.uploadedFile.mimeType) p.fileData.mimeType = this.uploadedFile.mimeType;
-                  } else if(p && p.file_data){
-                    p.file_data.file_uri = this.uploadedFile.uri;
-                    if(this.uploadedFile.mimeType) p.file_data.mime_type = this.uploadedFile.mimeType;
-                  }
-                }
-              }
-            }catch{}
+              this.uploadedFile = await this.gem.ai.files.upload({ file:this.fileBlob, config:{ displayName:this.fileBlob.name }});
+              try{ for(const msg of this.history){ if(!msg || msg.role!=='user' || !Array.isArray(msg.parts)) continue; for(const p of msg.parts){ if(p && p.fileData){ p.fileData.fileUri=this.uploadedFile.uri; if(this.uploadedFile.mimeType) p.fileData.mimeType=this.uploadedFile.mimeType; } else if(p && p.file_data){ p.file_data.file_uri=this.uploadedFile.uri; if(this.uploadedFile.mimeType) p.file_data.mime_type=this.uploadedFile.mimeType; } } } }catch{}
+            }catch(e){ this.finishWithError(rerr, req, rtries); return; }
+            continue;
           }
-          catch(e){ this.finishWithError(err, req, tries); return; }
-          continue; // retry next iteration
+          this.finishWithError(rerr, req, rtries); return;
         }
-        this.finishWithError(err, req, tries); return;
+        const txt = rresp?.text || this.gem.extractText(rresp);
+        const nonCode = (txt||'').trim().replace(/```[\s\S]*?```/g,'');
+        const tooShort = nonCode.length<200;
+        const leak = this.hasCtrlLeak(txt);
+        if(leak || (tooShort && this.pauseOnAnomaly)){
+          if(contentAttempts<5){
+            const reason = leak? 'artifact leak (<ctrl94>)' : 'Short/empty response';
+            this.status = `retrying (${reason})`;
+            this.retryAttempt = contentAttempts;
+            this.retryMax = 5;
+            this.lastErrorMessage = reason;
+            await this.backoffWait(60000); this.retrying=false; continue;
+          } else {
+            this.paused=true; this.status= leak? 'paused (artifact leak)' : 'paused (empty/short)';
+            toast(leak? 'Paused: artifact leak detected' : 'Paused: response too short','warn');
+            return;
+          }
+        }
+        resp=rresp; tries=rtries; var text=txt; break;
       }
-      const text = resp?.text || this.gem.extractText(resp);
       const modelMsg = {role:'model', parts:[{text}]};
       this.history.push(nextUser); this.history.push(modelMsg);
       const sid = this.nextSectionId++;
@@ -290,26 +320,9 @@ createApp({
     if(re.test((text||'').trim())){ this.status='complete'; toast('Distillation complete','good'); return true; }
     if(this.pauseOnAnomaly){
       if(/^\s*(i\s+(can\'t|cannot|won\'t)|as an ai|i\'m unable|i do not have access)/i.test(text||'')){ this.paused=true; this.status='paused (refusal)'; toast('Paused: likely refusal','warn'); return true; }
-      // Short/empty: auto-retry up to 5 times with 60s countdown, then pause
-      const nonCode = (text||'').trim().replace(/```[\s\S]*?```/g,'');
-      if(nonCode.length<200){
-        const MAX = 5;
-        if(this.anomalyRetryCount < MAX){
-          this.status = 'retrying (short output)';
-          this.retryAttempt = this.anomalyRetryCount;
-          this.retryMax = MAX;
-          this.lastErrorMessage = 'Short/empty response';
-          await this.backoffWait(60000);
-          this.retrying=false;
-          this.anomalyRetryCount++;
-          return false;
-        }
-        this.anomalyRetryCount=0;
-        this.paused=true; this.status='paused (empty/short)'; toast('Paused: response too short','warn'); return true;
-      }
       if(sim3(this.lastAssistant, text)>0.9){ this.paused=true; this.status='paused (loop)'; toast('Paused: response repeating','warn'); return true; }
     }
-    this.anomalyRetryCount=0; this.lastAssistant = text; return false;
+    this.lastAssistant = text; return false;
   },
 
   cleanFinish(){ this.running=false; this.retrying=false; if(this.status==='running') this.status='stopped'; },
