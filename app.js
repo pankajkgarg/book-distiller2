@@ -55,6 +55,18 @@ createApp({
   get endMarkerEscaped(){ return this.endMarker.replace(/^<|>$/g,''); },
 
   // methods
+  // Pull candidatesTokenCount from the raw Gemini response (best-effort)
+  extractCandidatesTokenCount(resp){
+    try{
+      const raw = resp?.raw || resp || {};
+      const direct = raw?.candidatesTokenCount ?? resp?.candidatesTokenCount;
+      if(Number.isFinite(Number(direct))) return Number(direct);
+      const um = raw?.usageMetadata || raw?.usage_metadata || resp?.usageMetadata || {};
+      const viaUsage = um?.candidatesTokenCount ?? um?.candidates_token_count;
+      if(Number.isFinite(Number(viaUsage))) return Number(viaUsage);
+    }catch{}
+    return null;
+  },
   saveKey(){ const k=this.apiKey.trim(); if(!k){ toast('Empty key not saved','warn'); return; } localStorage.setItem('distillboard.gemini_key',k); toast('API key saved','good'); },
   clearKey(){ localStorage.removeItem('distillboard.gemini_key'); this.apiKey=''; toast('API key cleared','good'); },
   onFileChange(e){ const f=e.target.files?.[0]; this.fileBlob=f||null; this.fileInfo = f? `${f.name} • ${(f.type||'').replace('application/','')} • ${(f.size/1048576).toFixed(2)} MB` : ''; },
@@ -112,8 +124,43 @@ createApp({
     }
     return `Section ${this.sections+1}`;
   },
-  appendDoc(md, sid){ const host=$('#liveDoc'); if(host.firstElementChild && host.firstElementChild.classList.contains('muted')) host.innerHTML=''; const container=el('div','section'); container.dataset.sid=String(sid); const head=el('div','sectionHead'); const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(md)}`); const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(sid); head.appendChild(title); head.appendChild(delBtn); container.appendChild(head); const body=el('div','sectionBody'); const prose=el('div','prose'); prose.innerHTML=window.marked.parse(md||''); body.appendChild(prose); container.appendChild(body); host.appendChild(container); host.scrollTo({top: host.scrollHeight, behavior:'smooth'}); },
-  rebuildDoc(){ const host=$('#liveDoc'); host.innerHTML=''; if(this.sectionsMeta.length===0){ host.innerHTML='<div class="muted">Output will appear here…</div>'; this.sections=0; this.tokenTally=0; return; } this.sections=0; this.tokenTally=0; for(const [i,meta] of this.sectionsMeta.entries()){ this.sections=i+1; this.tokenTally+=estimateTokens(meta.text||''); const container=el('div','section'); container.dataset.sid=String(meta.id); const head=el('div','sectionHead'); const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(meta.text)}`); const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(meta.id); head.appendChild(title); head.appendChild(delBtn); container.appendChild(head); const body=el('div','sectionBody'); const prose=el('div','prose'); prose.innerHTML=window.marked.parse(meta.text||''); body.appendChild(prose); container.appendChild(body); host.appendChild(container);} },
+  appendDoc(md, sid){
+    const host=$('#liveDoc');
+    if(host.firstElementChild && host.firstElementChild.classList.contains('muted')) host.innerHTML='';
+    const container=el('div','section'); container.dataset.sid=String(sid);
+    const head=el('div','sectionHead');
+    const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(md)}`);
+    // token badge (if available)
+    try{
+      const meta = this.sectionsMeta.find(s=>s.id===sid) || {};
+      if(Number.isFinite(Number(meta?.candidatesTokenCount))){ const badge=el('span','muted', `tokens: ${Number(meta.candidatesTokenCount)}`); badge.style.marginLeft='8px'; title.appendChild(badge); }
+    }catch{}
+    const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(sid);
+    head.appendChild(title); head.appendChild(delBtn);
+    container.appendChild(head);
+    const body=el('div','sectionBody'); const prose=el('div','prose');
+    prose.innerHTML=window.marked.parse(md||''); body.appendChild(prose);
+    container.appendChild(body);
+    host.appendChild(container);
+    host.scrollTo({top: host.scrollHeight, behavior:'smooth'});
+  },
+  rebuildDoc(){
+    const host=$('#liveDoc'); host.innerHTML='';
+    if(this.sectionsMeta.length===0){ host.innerHTML='<div class="muted">Output will appear here…</div>'; this.sections=0; this.tokenTally=0; return; }
+    this.sections=0; this.tokenTally=0;
+    for(const [i,meta] of this.sectionsMeta.entries()){
+      this.sections=i+1; this.tokenTally+=estimateTokens(meta.text||'');
+      const container=el('div','section'); container.dataset.sid=String(meta.id);
+      const head=el('div','sectionHead');
+      const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(meta.text)}`);
+      if(Number.isFinite(Number(meta?.candidatesTokenCount))){ const badge=el('span','muted', `tokens: ${Number(meta.candidatesTokenCount)}`); badge.style.marginLeft='8px'; title.appendChild(badge); }
+      const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(meta.id);
+      head.appendChild(title); head.appendChild(delBtn); container.appendChild(head);
+      const body=el('div','sectionBody'); const prose=el('div','prose');
+      prose.innerHTML=window.marked.parse(meta.text||''); body.appendChild(prose);
+      container.appendChild(body); host.appendChild(container);
+    }
+  },
   deleteSection(id){ const idx=this.sectionsMeta.findIndex(s=>s.id===id); if(idx===-1){ toast('Section not found','warn'); return; } const meta=this.sectionsMeta[idx]; try{ const mi=this.history.indexOf(meta.modelMsg); if(mi>=0) this.history.splice(mi,1); if(meta.userMsgBefore && Array.isArray(meta.userMsgBefore.parts)){ const isNextOnly = meta.userMsgBefore.parts.length===1 && (meta.userMsgBefore.parts[0]?.text||'')==='Next'; if(isNextOnly){ const ui=this.history.indexOf(meta.userMsgBefore); if(ui>=0) this.history.splice(ui,1); } } }catch{} this.sectionsMeta.splice(idx,1); this.rebuildDoc(); toast('Section deleted','good'); },
   resetDoc(){ $('#liveDoc').innerHTML='<div class="muted">Output will appear here…</div>'; },
 
@@ -224,7 +271,7 @@ createApp({
     const modelMsg1 = {role:'model', parts:[{text:firstText}]};
     this.history.push(userFirst); this.history.push(modelMsg1);
     const sid1 = this.nextSectionId++;
-    this.sectionsMeta.push({ id: sid1, text: firstText, modelMsg: modelMsg1, userMsgBefore: userFirst });
+    this.sectionsMeta.push({ id: sid1, text: firstText, modelMsg: modelMsg1, userMsgBefore: userFirst, candidatesTokenCount: this.extractCandidatesTokenCount(firstResp) });
     this.sections+=1; this.tokenTally+=estimateTokens(firstText); this.appendDoc(firstText, sid1);
     this.pushTrace({request:this.sanitize(req1), response:firstResp, retries:firstTries});
     const done = await this.postTurnChecks(firstText); if(done){ this.cleanFinish(); return; }
@@ -282,7 +329,7 @@ createApp({
       const modelMsg = {role:'model', parts:[{text}]};
       this.history.push(nextUser); this.history.push(modelMsg);
       const sid = this.nextSectionId++;
-      this.sectionsMeta.push({ id: sid, text, modelMsg, userMsgBefore: nextUser });
+      this.sectionsMeta.push({ id: sid, text, modelMsg, userMsgBefore: nextUser, candidatesTokenCount: this.extractCandidatesTokenCount(resp) });
       this.sections+=1; this.tokenTally+=estimateTokens(text); this.appendDoc(text, sid);
       this.pushTrace({request:this.sanitize(req), response:resp, retries:tries});
       const done = await this.postTurnChecks(text); if(done) break;

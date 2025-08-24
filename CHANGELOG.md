@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
  - ux: temperature now enabled by default at 1.0.
  - ux: remove misleading token estimate on upload.
  - feat: short/empty responses now auto-retry up to 5 times with a 60s countdown before pausing.
+ - fix: detect leaked thoughts token `<ctrl94>` in responses; reject and auto-retry like short/empty (60s × 5), without adding the bad turn to history.
  - feat: allow deleting any generated section; deletion also removes the corresponding user/model messages from history so future turns exclude it.
 
 ## 2025-08-19
@@ -27,3 +28,7 @@ All notable changes to this project will be documented in this file.
 - Docs: linked `CHANGELOG.md` from README and added Pages deployment instructions.
 - CI: added GitHub Actions workflow to publish to GitHub Pages on push to `main`.
 - Fix: explicitly send empty `tools` array in Gemini requests to avoid Google Search grounding.
+
+## 2025-08-24
+- feat: display Gemini `candidatesTokenCount` on each section in Live Document.
+- docs: README notes per-section token count in the Live Document UI.
