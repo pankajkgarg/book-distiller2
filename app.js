@@ -116,6 +116,8 @@ createApp({
   exportPdf(){ const include = $('#includeTrace').checked ? this.trace : null; const name=`${this.exportBase()}.pdf`; makePdf(name, this.combinedText(), include, this.exportMeta()); },
 
   combinedText(){ return this.history.filter(h=>h.role==='model').map(h=>h.parts.map(p=>p.text||'').join('')).join('\n\n').trim(); },
+  renderMd(md){ try{ return window.marked.parse(md||''); }catch{ return md||''; } },
+  stringify(obj){ try{ return JSON.stringify(obj, null, 2); }catch{ return String(obj); } },
   getTitleFromMd(md){
     const lines=(md||'').split(/\r?\n/);
     for(const line of lines){
@@ -124,45 +126,20 @@ createApp({
     }
     return `Section ${this.sections+1}`;
   },
-  appendDoc(md, sid){
-    const host=$('#liveDoc');
-    if(host.firstElementChild && host.firstElementChild.classList.contains('muted')) host.innerHTML='';
-    const container=el('div','section'); container.dataset.sid=String(sid);
-    const head=el('div','sectionHead');
-    const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(md)}`);
-    // token badge (if available)
-    try{
-      const meta = this.sectionsMeta.find(s=>s.id===sid) || {};
-      if(Number.isFinite(Number(meta?.candidatesTokenCount))){ const badge=el('span','muted', `tokens: ${Number(meta.candidatesTokenCount)}`); badge.style.marginLeft='8px'; title.appendChild(badge); }
-    }catch{}
-    const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(sid);
-    head.appendChild(title); head.appendChild(delBtn);
-    container.appendChild(head);
-    const body=el('div','sectionBody'); const prose=el('div','prose');
-    prose.innerHTML=window.marked.parse(md||''); body.appendChild(prose);
-    container.appendChild(body);
-    host.appendChild(container);
-    host.scrollTo({top: host.scrollHeight, behavior:'smooth'});
-  },
+  // appendDoc is now a no-op; rendering handled by template via v-for
+  appendDoc(md, sid){},
+  // rebuildDoc now only recalculates counters; DOM handled by template
   rebuildDoc(){
-    const host=$('#liveDoc'); host.innerHTML='';
-    if(this.sectionsMeta.length===0){ host.innerHTML='<div class="muted">Output will appear here…</div>'; this.sections=0; this.tokenTally=0; return; }
+    if(this.sectionsMeta.length===0){ this.sections=0; this.tokenTally=0; return; }
     this.sections=0; this.tokenTally=0;
     for(const [i,meta] of this.sectionsMeta.entries()){
-      this.sections=i+1; this.tokenTally+=estimateTokens(meta.text||'');
-      const container=el('div','section'); container.dataset.sid=String(meta.id);
-      const head=el('div','sectionHead');
-      const title=el('div','sectionTitle', `Section ${this.sections}: ${this.getTitleFromMd(meta.text)}`);
-      if(Number.isFinite(Number(meta?.candidatesTokenCount))){ const badge=el('span','muted', `tokens: ${Number(meta.candidatesTokenCount)}`); badge.style.marginLeft='8px'; title.appendChild(badge); }
-      const delBtn=el('button','btn ghost','Delete'); delBtn.onclick=()=>this.deleteSection(meta.id);
-      head.appendChild(title); head.appendChild(delBtn); container.appendChild(head);
-      const body=el('div','sectionBody'); const prose=el('div','prose');
-      prose.innerHTML=window.marked.parse(meta.text||''); body.appendChild(prose);
-      container.appendChild(body); host.appendChild(container);
+      this.sections=i+1;
+      this.tokenTally+=estimateTokens(meta.text||'');
     }
   },
   deleteSection(id){ const idx=this.sectionsMeta.findIndex(s=>s.id===id); if(idx===-1){ toast('Section not found','warn'); return; } const meta=this.sectionsMeta[idx]; try{ const mi=this.history.indexOf(meta.modelMsg); if(mi>=0) this.history.splice(mi,1); if(meta.userMsgBefore && Array.isArray(meta.userMsgBefore.parts)){ const isNextOnly = meta.userMsgBefore.parts.length===1 && (meta.userMsgBefore.parts[0]?.text||'')==='Next'; if(isNextOnly){ const ui=this.history.indexOf(meta.userMsgBefore); if(ui>=0) this.history.splice(ui,1); } } }catch{} this.sectionsMeta.splice(idx,1); this.rebuildDoc(); toast('Section deleted','good'); },
-  resetDoc(){ $('#liveDoc').innerHTML='<div class="muted">Output will appear here…</div>'; },
+  // resetDoc no longer manipulates DOM; placeholder handled in template
+  resetDoc(){},
 
   async start(){
     if(!this.apiKey.trim()){ toast('Add your Gemini API key first','bad'); return; }
@@ -353,7 +330,7 @@ createApp({
   applyTheme(){ const preferDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches; const isDark = this.themeMode==='dark' || (this.themeMode==='auto' && preferDark); document.body.classList.toggle('dark', isDark); },
   persist(){ try{ localStorage.setItem('distillboard.prompt', this.prompt||''); localStorage.setItem('distillboard.model', this.model||''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature??'')); localStorage.setItem('distillboard.themeMode', this.themeMode||'auto'); localStorage.removeItem('distillboard.dark'); }catch{} },
   serializeErr(e){ if(!e) return {message:'unknown'}; if(typeof e==='string') return {message:e}; return { message: e.message||'unknown', name:e.name||'Error', raw:e?.response||e?.toString?.() }; },
-  pushTrace({request,response,error,retries}){ const ts=new Date().toISOString(); this.trace.push({ts,request,response,error,retries}); const card=el('div','item'); card.appendChild(el('div','',`<b>${error?'Error':'Turn'}</b> <span class=\"muted\" style=\"float:right\">${new Date().toLocaleTimeString()}</span>`)); const rq=el('div','pre'); rq.textContent=JSON.stringify(request,null,2); card.appendChild(el('div','muted','Request:')); card.appendChild(rq); if(response){ const rs=el('div','pre'); rs.textContent=JSON.stringify(response,null,2); card.appendChild(el('div','muted','Response:')); card.appendChild(rs);} if(error){ const er=el('div','pre'); er.textContent=JSON.stringify(error,null,2); card.appendChild(el('div','muted','Error:')); card.appendChild(er);} if(retries>0) card.appendChild(el('div','muted',`Retries: ${retries}`)); $('#traceList').prepend(card); },
+  pushTrace({request,response,error,retries}){ const ts=new Date().toISOString(); this.trace.push({ts,request,response,error,retries}); },
 
   // backoff UI helper (retry timings are driven by gemini service via onTransient)
   async backoffWait(ms){

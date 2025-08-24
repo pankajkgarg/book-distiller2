@@ -152,7 +152,23 @@
     <!-- RIGHT -->
     <div class="card" style="display:flex;flex-direction:column">
       <div class="head">Live Document</div>
-      <div class="doc" id="liveDoc"><div class="muted">Output will appear here…</div></div>
+      <div class="doc" id="liveDoc">
+        <div v-if="sectionsMeta.length===0" class="muted">Output will appear here…</div>
+        <div v-else>
+          <div class="section" v-for="(meta, i) in sectionsMeta" :key="meta.id" :data-sid="String(meta.id)">
+            <div class="sectionHead">
+              <div class="sectionTitle">
+                Section {{ i+1 }}: {{ getTitleFromMd(meta.text) }}
+                <span v-if="Number.isFinite(Number(meta?.candidatesTokenCount))" class="muted" style="margin-left:8px">tokens: {{ Number(meta.candidatesTokenCount) }}</span>
+              </div>
+              <button class="btn ghost" @click="deleteSection(meta.id)">Delete</button>
+            </div>
+            <div class="sectionBody">
+              <div class="prose" v-html="renderMd(meta.text)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -164,7 +180,22 @@
       <button class="btn" @click="closeTrace">Close</button>
       <button class="btn" @click="downloadTrace">Download trace.json</button>
     </div>
-    <div id="traceList" class="list"></div>
+    <div id="traceList" class="list">
+      <div class="item" v-for="t in trace.slice().reverse()" :key="t.ts">
+        <div><b>{{ t.error ? 'Error' : 'Turn' }}</b> <span class="muted" style="float:right">{{ new Date(t.ts).toLocaleTimeString() }}</span></div>
+        <div class="muted">Request:</div>
+        <div class="pre">{{ stringify(t.request) }}</div>
+        <template v-if="t.response">
+          <div class="muted">Response:</div>
+          <div class="pre">{{ stringify(t.response) }}</div>
+        </template>
+        <template v-if="t.error">
+          <div class="muted">Error:</div>
+          <div class="pre">{{ stringify(t.error) }}</div>
+        </template>
+        <div class="muted" v-if="t.retries>0">Retries: {{ t.retries }}</div>
+      </div>
+    </div>
   </div>
 
   <!-- Export modal -->

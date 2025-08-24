@@ -32,3 +32,7 @@ All notable changes to this project will be documented in this file.
 ## 2025-08-24
 - feat: display Gemini `candidatesTokenCount` on each section in Live Document.
 - docs: README notes per-section token count in the Live Document UI.
+ - refactor: replace manual DOM updates with idiomatic Petite‑Vue rendering
+   - Live Document now uses `v-for` over `sectionsMeta` with `v-html` for Markdown
+   - Trace drawer renders via `v-for` over `trace` (reversed) instead of imperative DOM
+   - Removed direct `innerHTML`/`appendChild` calls; UI stays in sync reactively
