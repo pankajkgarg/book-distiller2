@@ -49,7 +49,7 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
   - 429 and 5xx: fixed 60s waits with a visible countdown, up to 5 automatic attempts; after that, the run pauses and shows “Resume”.
   - Network/other transient conditions: exponential backoff with a visible countdown.
  - Content anomalies:
-   - Short/empty output: rejected and retried automatically (60s × 5) before pausing.
+   - Short/empty output: rejected and retried automatically (60s × 5) before pausing — except when the reply is exactly the end marker (e.g., `<end_of_book>`), which completes the run.
    - Leaked thoughts marker `<ctrl94>`: rejected and retried automatically (60s × 5) before pausing, and the bad turn is not added to history.
 
 ## UI Changes

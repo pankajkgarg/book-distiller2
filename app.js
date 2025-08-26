@@ -227,7 +227,9 @@ createApp({
       if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
       const text1 = resp1?.text || this.gem.extractText(resp1);
       const nonCode = (text1||'').trim().replace(/```[\s\S]*?```/g,'');
-      const tooShort = nonCode.length<200;
+      const endOnlyRe = new RegExp('^\\s*'+String(this.endMarker||'<end_of_book>')+'\\s*$');
+      const isEndOnly = endOnlyRe.test((text1||'').trim());
+      const tooShort = nonCode.length<200 && !isEndOnly;
       const leak = this.hasCtrlLeak(text1);
       if(leak || (tooShort && this.pauseOnAnomaly)){
         if(contentAttempts<5){
@@ -285,7 +287,9 @@ createApp({
         }
         const txt = rresp?.text || this.gem.extractText(rresp);
         const nonCode = (txt||'').trim().replace(/```[\s\S]*?```/g,'');
-        const tooShort = nonCode.length<200;
+        const endOnlyRe = new RegExp('^\\s*'+String(this.endMarker||'<end_of_book>')+'\\s*$');
+        const isEndOnly = endOnlyRe.test((txt||'').trim());
+        const tooShort = nonCode.length<200 && !isEndOnly;
         const leak = this.hasCtrlLeak(txt);
         if(leak || (tooShort && this.pauseOnAnomaly)){
           if(contentAttempts<5){
