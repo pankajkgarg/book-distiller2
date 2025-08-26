@@ -374,6 +374,10 @@ createApp({
     // Pause instead of aborting on errors
     this.retrying=false;
     this.paused=true;
+    // If first turn hasn't completed yet, stop running so Resume will restart from the first turn
+    if(!this.sectionsMeta || this.sectionsMeta.length===0){
+      this.running=false;
+    }
     this.status='paused (error)';
     this.lastErrorMessage = err?.message || 'unknown';
     this.pushTrace({request:this.sanitize(req), error:this.serializeErr(err), retries});
