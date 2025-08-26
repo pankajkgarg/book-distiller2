@@ -1,39 +1,40 @@
 // Normalize GenerateContent request args for the @google/genai SDK
-// - Lifts config.systemInstruction / generationConfig to top-level
-// - Duplicates snake_case fields for compatibility
-// - Ensures tools defaults to []
+// - Ensures `config.systemInstruction` and `config.temperature` are set per SDK docs
+// - Accepts legacy top-level/system_instruction and generationConfig inputs
+// - Ensures tools defaults to [] and preserves `config`
 
 export function normalizeGenerateContentArgs(args){
   const src = args || {};
   const out = { ...src };
 
-  // Lift legacy config fields
-  const cfg = src.config || {};
-  if(out.systemInstruction == null && cfg.systemInstruction != null){
-    out.systemInstruction = cfg.systemInstruction;
-  }
-  if(out.generationConfig == null && cfg.generationConfig != null){
-    out.generationConfig = cfg.generationConfig;
+  // Start from provided config (SDK expects this)
+  const cfg = { ...(src.config||{}) };
+
+  // Normalize systemInstruction: prefer src.config, else top-level camel/snake
+  const sysFromTop = src.systemInstruction ?? src.system_instruction;
+  if(cfg.systemInstruction == null && sysFromTop != null){ cfg.systemInstruction = sysFromTop; }
+
+  // Normalize temperature: accept generationConfig.temperature or top-level generation_config
+  const genCfg = src.generationConfig ?? src.generation_config;
+  const tempFromGen = genCfg?.temperature;
+  if(cfg.temperature == null && (tempFromGen != null)){
+    const t = Number(tempFromGen);
+    if(Number.isFinite(t)) cfg.temperature = t;
   }
 
-  // Allow snake_case inputs too
-  if(out.systemInstruction == null && src.system_instruction != null){
-    out.systemInstruction = src.system_instruction;
-  }
-  if(out.generationConfig == null && src.generation_config != null){
-    out.generationConfig = src.generation_config;
-  }
+  // Write back normalized config for SDK
+  out.config = cfg;
 
-  // Duplicate for compatibility
+  // Also mirror for compatibility (not required by SDK)
+  out.systemInstruction = cfg.systemInstruction ?? out.systemInstruction;
   out.system_instruction = out.systemInstruction;
-  if(out.generationConfig) out.generation_config = out.generationConfig;
-
-  // Remove config to avoid confusion in downstream client
-  delete out.config;
+  if(cfg.temperature != null){
+    out.generationConfig = { ...(out.generationConfig||{}), temperature: cfg.temperature };
+    out.generation_config = out.generationConfig;
+  }
 
   // Ensure tools is present
   if(!Array.isArray(out.tools)) out.tools = [];
 
   return out;
 }
-

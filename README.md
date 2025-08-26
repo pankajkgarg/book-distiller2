@@ -26,6 +26,7 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
 - Model, prompt, and generation temperature persist in `localStorage` as well.
 - External libs (Petite‑Vue, @google/genai, marked, jsPDF) are loaded from CDNs.
 - Requests explicitly omit search tools so Gemini responds without Google Search grounding.
+- System prompt is attached as `config.systemInstruction` (and temperature via `config.temperature`) per the official SDK docs.
 - Left pane is simplified into clear steps:
   - Step 1 — enter your Gemini API key
   - Step 2 — choose a model

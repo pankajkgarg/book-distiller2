@@ -12,30 +12,27 @@ function hasFilePart(userMsg, uri){
   return got === uri;
 }
 
-// Test: first request contains file part and systemInstruction
+// Test: first request contains file part and config.systemInstruction
 {
   const uploaded = fakeUploaded('files/F1', 'application/pdf');
   const req = buildFirstRequest({ model:'gemini-2.5-pro', uploadedFile: uploaded, prompt: 'SYSTEM', useTemperature: true, temperature: 0.7, firstInstruction: 'Do it' });
   assert.equal(req.model, 'gemini-2.5-pro');
-  assert.equal(req.systemInstruction, 'SYSTEM');
-  assert.equal(req.system_instruction, 'SYSTEM');
+  assert.equal(req?.config?.systemInstruction, 'SYSTEM');
   assert.equal(req.tools.length, 0);
-  assert.ok(req.generationConfig && typeof req.generationConfig.temperature === 'number');
-  assert.equal(req.generation_config.temperature, req.generationConfig.temperature);
+  assert.ok(req?.config && typeof req.config.temperature === 'number');
   assert.ok(Array.isArray(req.contents) && req.contents.length === 1);
   const user = req.contents[0];
   assert.equal(user.role, 'user');
   assert.ok(hasFilePart(user, 'files/F1'));
 }
 
-// Test: next request does NOT reattach file by default and appends 'Next'
+// Test: next request does NOT reattach file by default and appends 'Next'; config.systemInstruction present
 {
   const uploaded = fakeUploaded('files/F2', 'application/epub+zip');
   const history = [ { role:'user', parts:[ { fileData:{ fileUri:'files/F2', mimeType:'application/epub+zip' } }, { text:'Start' } ] }, { role:'model', parts:[ { text:'ok' } ] } ];
   const req = buildNextRequest({ model:'gemini-2.5-pro', history, uploadedFile: uploaded, prompt: 'SYSTEM', useTemperature: false });
-  assert.equal(req.systemInstruction, 'SYSTEM');
-  assert.equal(req.system_instruction, 'SYSTEM');
-  assert.ok(!req.generationConfig); // default disabled
+  assert.equal(req?.config?.systemInstruction, 'SYSTEM');
+  assert.ok(!req?.config?.temperature); // default disabled
   assert.ok(Array.isArray(req.contents) && req.contents.length === history.length + 1);
   const nextUser = req.contents[req.contents.length - 1];
   assert.equal(nextUser.role, 'user');

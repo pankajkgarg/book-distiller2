@@ -11,8 +11,7 @@ This document is the authoritative description of how the app orchestrates Gemin
 ## Setup
 
 - API key is stored in `localStorage` under `distillboard.gemini_key`.
-- The system prompt is sent as `systemInstruction`. Temperature is applied only when the toggle is on.
-- The system prompt is sent as `systemInstruction` (and duplicated as `system_instruction` for compatibility). Temperature is applied only when the toggle is on.
+- The system prompt is sent via `config.systemInstruction` per SDK docs. Temperature is applied via `config.temperature` when the toggle is on.
 - An empty `tools: []` is always sent to avoid search grounding.
 
 ## Upload and Processing

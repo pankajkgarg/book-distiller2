@@ -8,11 +8,11 @@ All notable changes to this project will be documented in this file.
 
 ## 2025-08-26
 - fix: revert to sending only "Next" on subsequent turns (file attached only on the first turn); rely on history + invalid-URI recovery to keep access.
-- fix: keep `systemInstruction` at top-level for all requests; also include snake_case `system_instruction` for client compatibility.
+- fix: attach system prompt via `config.systemInstruction` (and temperature via `config.temperature`) per SDK docs; remove reliance on top‑level only fields.
 - tests: update request builder tests to assert no file reattachment by default; add explicit reattach option test.
-- tests: assert presence of both `systemInstruction` and `system_instruction`, and of `generationConfig`/`generation_config` when temperature enabled.
+- tests: assert presence of `config.systemInstruction` and `config.temperature` when enabled.
 - docs: WORKFLOW and UI text updated to reflect first-turn-only attachment and history-based access.
- - fix: normalize request args before calling SDK to always lift `config.systemInstruction`/`generationConfig` and duplicate snake_case forms; ensures system prompt is sent.
+ - fix: normalize request args before calling SDK to ensure `config.systemInstruction`/`config.temperature` are populated; keep mirrors for compatibility.
 
 ## 2025-08-21
 - feat: auto-retry 429 and 5xx with a fixed 60s wait and visible countdown; only pause and show “Resume” after 5 failed attempts.
