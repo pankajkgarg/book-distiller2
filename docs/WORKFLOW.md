@@ -23,7 +23,7 @@ This document is the authoritative description of how the app orchestrates Gemin
 ## Turn Structure
 
 - First turn: A single user message that includes the uploaded file part and an instruction to produce the opening and first section.
-- Subsequent turns: A single user message with only `"Next"`. The file is not reattached.
+- Subsequent turns: A user message that reattaches the file part and includes only `"Next"` text. The file is reattached every turn.
 - Conversation context: Each request includes the full prior `history` so Gemini retains context, including the original file reference from the first turn.
 
 ## Error Handling and Retries
