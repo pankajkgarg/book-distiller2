@@ -7,9 +7,12 @@ All notable changes to this project will be documented in this file.
 - docs: clarify in README and WORKFLOW that short/empty responses are paused unless the reply is exactly the end marker, which completes the run.
 
 ## 2025-08-26
-- fix: reattach the uploaded book file on every turn so chat generation always includes the file reference; also send `systemInstruction` at top level.
-- tests: add minimal Node tests for request builders to assert file part attachment and `systemInstruction` placement.
-- docs: update WORKFLOW turn structure to state the file is reattached each turn (aligns with README/UI text).
+- fix: revert to sending only "Next" on subsequent turns (file attached only on the first turn); rely on history + invalid-URI recovery to keep access.
+- fix: keep `systemInstruction` at top-level for all requests; also include snake_case `system_instruction` for client compatibility.
+- tests: update request builder tests to assert no file reattachment by default; add explicit reattach option test.
+- tests: assert presence of both `systemInstruction` and `system_instruction`, and of `generationConfig`/`generation_config` when temperature enabled.
+- docs: WORKFLOW and UI text updated to reflect first-turn-only attachment and history-based access.
+ - fix: normalize request args before calling SDK to always lift `config.systemInstruction`/`generationConfig` and duplicate snake_case forms; ensures system prompt is sent.
 
 ## 2025-08-21
 - feat: auto-retry 429 and 5xx with a fixed 60s wait and visible countdown; only pause and show “Resume” after 5 failed attempts.

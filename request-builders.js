@@ -27,17 +27,24 @@ export function buildFirstRequest({ model, uploadedFile, prompt, useTemperature=
   const instruction = firstInstruction || 'Begin as instructed.';
   const user = userContent([ filePart, instruction ]);
   const req = { model, contents: [user], tools: [], systemInstruction: prompt };
-  return addGenConfigIfNeeded(req, { useTemperature, temperature });
+  addGenConfigIfNeeded(req, { useTemperature, temperature });
+  // Add snake_case duplicates for compatibility with different client versions
+  req.system_instruction = req.systemInstruction;
+  if(req.generationConfig){ req.generation_config = req.generationConfig; }
+  return req;
 }
 
-export function buildNextRequest({ model, history, uploadedFile, prompt, useTemperature=false, temperature=0, reattachFileEachTurn=true }){
+export function buildNextRequest({ model, history, uploadedFile, prompt, useTemperature=false, temperature=0, reattachFileEachTurn=false }){
   const parts = [];
   if(reattachFileEachTurn){ parts.push(filePartFromUploaded(uploadedFile)); }
   parts.push('Next');
   const nextUser = userContent(parts);
   const contents = [...(history||[]), nextUser];
   const req = { model, contents, tools: [], systemInstruction: prompt };
-  return addGenConfigIfNeeded(req, { useTemperature, temperature });
+  addGenConfigIfNeeded(req, { useTemperature, temperature });
+  req.system_instruction = req.systemInstruction;
+  if(req.generationConfig){ req.generation_config = req.generationConfig; }
+  return req;
 }
 
 export function makeUserContent(parts){ return userContent(parts); }

@@ -1,6 +1,7 @@
 // Gemini service: SDK wiring + retry helpers
 // Retry/backoff semantics and transient detection are documented in docs/WORKFLOW.md
 import { GoogleGenAI, createUserContent, createPartFromUri } from 'https://esm.run/@google/genai@0.14.1';
+import { normalizeGenerateContentArgs } from './request-normalize.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -66,7 +67,11 @@ export function createGeminiService({ apiKey, shouldContinue = ()=>true, onTrans
   async function callWithRetries(args){
     let attempt=0, lastErr=null;
     while(shouldContinue()){
-      try{ const res = await ai.models.generateContent(args); return [res, attempt, null]; }
+      try{
+        const body = normalizeGenerateContentArgs(args);
+        const res = await ai.models.generateContent(body);
+        return [res, attempt, null];
+      }
       catch(err){
         lastErr=err; const transient=isTransient(err);
         if(transient){

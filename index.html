@@ -144,7 +144,7 @@
               <input v-model.number="budgetTime" type="number" min="0" placeholder="(optional)" style="width:140px">
             </div>
           </div>
-          <div class="muted" style="margin-top:8px">No chunking. The book file is uploaded once and re-attached on every turn. Exact request & response are logged in Trace.</div>
+          <div class="muted" style="margin-top:8px">No chunking. The book file is uploaded once for the first turn; subsequent turns send only "Next" and rely on conversation history. If the file URI becomes invalid, the app re-uploads the file and rewrites history to the new URI. Exact request & response are logged in Trace.</div>
         </details>
       </div>
     </div>

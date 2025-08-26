@@ -18,28 +18,39 @@ function hasFilePart(userMsg, uri){
   const req = buildFirstRequest({ model:'gemini-2.5-pro', uploadedFile: uploaded, prompt: 'SYSTEM', useTemperature: true, temperature: 0.7, firstInstruction: 'Do it' });
   assert.equal(req.model, 'gemini-2.5-pro');
   assert.equal(req.systemInstruction, 'SYSTEM');
+  assert.equal(req.system_instruction, 'SYSTEM');
   assert.equal(req.tools.length, 0);
   assert.ok(req.generationConfig && typeof req.generationConfig.temperature === 'number');
+  assert.equal(req.generation_config.temperature, req.generationConfig.temperature);
   assert.ok(Array.isArray(req.contents) && req.contents.length === 1);
   const user = req.contents[0];
   assert.equal(user.role, 'user');
   assert.ok(hasFilePart(user, 'files/F1'));
 }
 
-// Test: next request reattaches file and appends 'Next'
+// Test: next request does NOT reattach file by default and appends 'Next'
 {
   const uploaded = fakeUploaded('files/F2', 'application/epub+zip');
   const history = [ { role:'user', parts:[ { fileData:{ fileUri:'files/F2', mimeType:'application/epub+zip' } }, { text:'Start' } ] }, { role:'model', parts:[ { text:'ok' } ] } ];
-  const req = buildNextRequest({ model:'gemini-2.5-pro', history, uploadedFile: uploaded, prompt: 'SYSTEM', useTemperature: false, reattachFileEachTurn: true });
+  const req = buildNextRequest({ model:'gemini-2.5-pro', history, uploadedFile: uploaded, prompt: 'SYSTEM', useTemperature: false });
   assert.equal(req.systemInstruction, 'SYSTEM');
+  assert.equal(req.system_instruction, 'SYSTEM');
   assert.ok(!req.generationConfig); // default disabled
   assert.ok(Array.isArray(req.contents) && req.contents.length === history.length + 1);
   const nextUser = req.contents[req.contents.length - 1];
   assert.equal(nextUser.role, 'user');
-  assert.ok(hasFilePart(nextUser, 'files/F2'));
+  assert.ok(!hasFilePart(nextUser, 'files/F2'));
   const textPart = nextUser.parts.find(p=>p && p.text !== undefined);
   assert.equal(textPart?.text, 'Next');
 }
 
-console.log('request-builders tests passed');
+// Test: next request CAN reattach file when explicitly requested
+{
+  const uploaded = fakeUploaded('files/F3', 'application/pdf');
+  const history = [ { role:'user', parts:[ { fileData:{ fileUri:'files/F3', mimeType:'application/pdf' } }, { text:'Start' } ] }, { role:'model', parts:[ { text:'ok' } ] } ];
+  const req = buildNextRequest({ model:'gemini-2.5-pro', history, uploadedFile: uploaded, prompt: 'SYSTEM', reattachFileEachTurn: true });
+  const nextUser = req.contents[req.contents.length - 1];
+  assert.ok(hasFilePart(nextUser, 'files/F3'));
+}
 
+console.log('request-builders tests passed');
