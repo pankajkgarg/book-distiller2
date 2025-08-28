@@ -13,7 +13,6 @@ All notable changes to this project will be documented in this file.
 - tests: assert presence of `config.systemInstruction` and `config.temperature` when enabled.
 - docs: WORKFLOW and UI text updated to reflect first-turn-only attachment and history-based access.
  - fix: normalize request args before calling SDK to ensure `config.systemInstruction`/`config.temperature` are populated; keep mirrors for compatibility.
- - fix: prevent stray "Next" after a first-turn error by setting `running=false` when no sections exist; Resume restarts the first turn instead of advancing.
 
 ## 2025-08-21
 - feat: auto-retry 429 and 5xx with a fixed 60s wait and visible countdown; only pause and show “Resume” after 5 failed attempts.
