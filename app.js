@@ -1,7 +1,6 @@
 // Conversation workflow and error handling are documented in docs/WORKFLOW.md
 import { createApp } from 'https://unpkg.com/petite-vue?module';
-import { createGeminiService } from './gemini.js';
-import { buildFirstRequest, buildNextRequest, makeUserContent, makeFilePart } from './request-builders.js';
+import { createGeminiService, createUserContent, createPartFromUri } from './gemini.js';
 
 // Helpers
 const $ = s => document.querySelector(s);
@@ -219,18 +218,9 @@ createApp({
     this.running=true; this.status='running'; this.startTime=Date.now();
 
     // First turn (see docs/WORKFLOW.md: Turn Structure)
-    const userFirst = makeUserContent([
-      makeFilePart(this.uploadedFile),
-      'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.'
-    ]);
-    const req1 = buildFirstRequest({
-      model: this.model,
-      uploadedFile: this.uploadedFile,
-      prompt: this.prompt,
-      useTemperature: !!this.useTemperature,
-      temperature: Number(this.temperature)||0,
-      firstInstruction: 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.'
-    });
+    const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
+    const userFirst = createUserContent([ filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.' ]);
+    const req1 = { model: this.model, contents:[ userFirst ], tools: [], config: this.makeConfig() };
     let firstResp=null, firstTries=0, firstText='';
     for(let contentAttempts=0;;){
       const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
@@ -273,17 +263,10 @@ createApp({
       if(+this.budgetTime>0 && (Date.now()-this.startTime)/1000 > +this.budgetTime){ this.status='time budget reached'; toast('Time budget reached','warn'); break; }
       if(+this.budgetTokens>0 && this.tokenTally >= +this.budgetTokens){ this.status='token budget reached (est)'; toast('Token budget (estimated) reached','warn'); break; }
 
-      // Subsequent turns: reattach the file each time to ensure access
-      const nextUser = makeUserContent([ makeFilePart(this.uploadedFile), 'Next' ]);
-      const req = buildNextRequest({
-        model: this.model,
-        history: this.history,
-        uploadedFile: this.uploadedFile,
-        prompt: this.prompt,
-        useTemperature: !!this.useTemperature,
-        temperature: Number(this.temperature)||0,
-        reattachFileEachTurn: true
-      });
+      // After the first turn, only send "Next"; do not reattach the file.
+      // See docs/WORKFLOW.md → Turn Structure
+      const nextUser = createUserContent([ 'Next' ]);
+      const req = { model:this.model, contents:[...this.history, nextUser], tools: [], config: this.makeConfig() };
       let resp=null, tries=0;
       for(let contentAttempts=0;;){
         const out = await this.gem.callWithRetries(req).catch(e=>[null,0,e]);
@@ -347,7 +330,6 @@ createApp({
 
   // helpers
   sanitize(req){ return JSON.parse(JSON.stringify(req)); },
-  // Deprecated: requests now set systemInstruction at top-level
   makeConfig(){ const cfg={ systemInstruction: this.prompt }; if(this.useTemperature){ cfg.generationConfig={ temperature: Number(this.temperature)||0 }; } return cfg; },
   applyTheme(){ const preferDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches; const isDark = this.themeMode==='dark' || (this.themeMode==='auto' && preferDark); document.body.classList.toggle('dark', isDark); },
   persist(){ try{ localStorage.setItem('distillboard.prompt', this.prompt||''); localStorage.setItem('distillboard.model', this.model||''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature??'')); localStorage.setItem('distillboard.themeMode', this.themeMode||'auto'); localStorage.removeItem('distillboard.dark'); }catch{} },
