@@ -26,13 +26,11 @@ export function buildFirstRequest({ model, uploadedFile, prompt, useTemperature=
   const filePart = filePartFromUploaded(uploadedFile);
   const instruction = firstInstruction || 'Begin as instructed.';
   const user = userContent([ filePart, instruction ]);
-  const config = { systemInstruction: prompt };
-  if(useTemperature){ config.temperature = Number(temperature)||0; }
-  const req = { model, contents: [user], tools: [], config };
-  // For compatibility with prior shapes, also include top-level mirrors (SDK uses config)
-  req.systemInstruction = prompt;
+  const req = { model, contents: [user], tools: [], systemInstruction: prompt };
+  addGenConfigIfNeeded(req, { useTemperature, temperature });
+  // Add snake_case duplicates for compatibility with different client versions
   req.system_instruction = req.systemInstruction;
-  if(useTemperature){ req.generationConfig = { temperature: config.temperature }; req.generation_config = req.generationConfig; }
+  if(req.generationConfig){ req.generation_config = req.generationConfig; }
   return req;
 }
 
@@ -42,13 +40,10 @@ export function buildNextRequest({ model, history, uploadedFile, prompt, useTemp
   parts.push('Next');
   const nextUser = userContent(parts);
   const contents = [...(history||[]), nextUser];
-  const config = { systemInstruction: prompt };
-  if(useTemperature){ config.temperature = Number(temperature)||0; }
-  const req = { model, contents, tools: [], config };
-  // Compatibility mirrors (SDK uses config)
-  req.systemInstruction = prompt;
+  const req = { model, contents, tools: [], systemInstruction: prompt };
+  addGenConfigIfNeeded(req, { useTemperature, temperature });
   req.system_instruction = req.systemInstruction;
-  if(useTemperature){ req.generationConfig = { temperature: config.temperature }; req.generation_config = req.generationConfig; }
+  if(req.generationConfig){ req.generation_config = req.generationConfig; }
   return req;
 }
 
