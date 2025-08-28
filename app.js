@@ -273,14 +273,16 @@ createApp({
       if(+this.budgetTime>0 && (Date.now()-this.startTime)/1000 > +this.budgetTime){ this.status='time budget reached'; toast('Time budget reached','warn'); break; }
       if(+this.budgetTokens>0 && this.tokenTally >= +this.budgetTokens){ this.status='token budget reached (est)'; toast('Token budget (estimated) reached','warn'); break; }
 
-      // Subsequent turns: send only "Next"; rely on history's original file reference
-      const nextUser = makeUserContent([ 'Next' ]);
+      // Subsequent turns: reattach the file each time to ensure access
+      const nextUser = makeUserContent([ makeFilePart(this.uploadedFile), 'Next' ]);
       const req = buildNextRequest({
         model: this.model,
         history: this.history,
+        uploadedFile: this.uploadedFile,
         prompt: this.prompt,
         useTemperature: !!this.useTemperature,
-        temperature: Number(this.temperature)||0
+        temperature: Number(this.temperature)||0,
+        reattachFileEachTurn: true
       });
       let resp=null, tries=0;
       for(let contentAttempts=0;;){

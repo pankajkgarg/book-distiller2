@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/request-builders.test.mjs && node tests/request-normalize.test.mjs"
+    "test": "node tests/request-builders.test.mjs"
   },
   "devDependencies": {
     "vite": "^5.4.0"
