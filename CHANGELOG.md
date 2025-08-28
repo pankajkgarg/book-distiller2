@@ -2,10 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## 2025-08-25
-- fix: accept an end-of-book-only reply (`<end_of_book>`) as valid completion instead of flagging it as a short/empty anomaly; retries no longer trigger in this case.
-- docs: clarify in README and WORKFLOW that short/empty responses are paused unless the reply is exactly the end marker, which completes the run.
-
 ## 2025-08-21
 - feat: auto-retry 429 and 5xx with a fixed 60s wait and visible countdown; only pause and show “Resume” after 5 failed attempts.
 - docs: clarify retry behavior in README (fixed 60s for 429/5xx with 5 attempts; exponential for others).

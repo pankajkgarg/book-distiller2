@@ -51,7 +51,7 @@ Rationale
 - Completion: When the latest assistant text ends with the end marker (default `<end_of_book>`), status becomes `complete`.
 - Anomaly Pauses (configurable):
   - Refusal phrasing → `paused (refusal)`.
-  - Very short non‑code output (< 200 chars) → `paused (empty/short)` (except when the reply is exactly the end marker; that counts as completion).
+  - Very short non‑code output (< 200 chars) → `paused (empty/short)`.
   - High similarity to prior assistant message (> 0.9 trigram sim) → `paused (loop)`.
 - Budgets:
   - Time budget (seconds) → stop with `time budget reached`.
