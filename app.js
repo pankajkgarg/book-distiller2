@@ -6,6 +6,7 @@ import { createGeminiService, createUserContent, createPartFromUri } from './gem
 const $ = s => document.querySelector(s);
 const el = (tag, cls, html) => { const x=document.createElement(tag); if(cls) x.className=cls; if(html!==undefined) x.innerHTML=html; return x; };
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const AUTO_WAIT_MS = 60000;
 const estimateTokens = s => Math.ceil((s||'').length/4);
 function sim3(a,b){ const grams=s=>{const t=(s||'').toLowerCase().replace(/\s+/g,' ').trim(); const G=new Set(); for(let i=0;i<Math.max(0,t.length-2);i++) G.add(t.slice(i,i+3)); return G;}; const A=grams(a),B=grams(b); const inter=[...A].filter(x=>B.has(x)).length; const union=new Set([...A,...B]).size||1; return inter/union; }
 function toast(msg,type='info',ms=3500){ const host=$('#toasts'); const n=el('div',`toast ${type}`,msg); host.appendChild(n); setTimeout(()=>n.remove(),ms);} 
@@ -31,6 +32,7 @@ createApp({
   budgetTokens: '',
   budgetTime: '',
   pauseOnAnomaly: true,
+  autoWaitBetweenRequests: localStorage.getItem('distillboard.autoWaitBetweenRequests') === 'true',
 
   status: 'idle', sections: 0, tokenTally: 0,
   running: false, paused: false,
@@ -39,13 +41,15 @@ createApp({
   trace: [],
   // retry/backoff UI state
   retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0, retryPlannedMs: 0,
+  // auto-wait UI state
+  autoWaiting: false, autoWaitRemainingMs: 0, autoWaitPlannedMs: 0,
   lastErrorMessage: '',
 
   model: (()=>{ const allowed=['gemini-2.5-pro','gemini-2.5-flash','gemini-2.5-flash-lite']; const saved=localStorage.getItem('distillboard.model'); return allowed.includes(saved)?saved:'gemini-2.5-pro'; })(),
   useTemperature: (()=>{ const v=localStorage.getItem('distillboard.useTemperature'); return (v===null)? true : (v==='true'); })(),
   temperature: +(localStorage.getItem('distillboard.temperature')||'1.0'),
   themeMode: (()=>{ const v=localStorage.getItem('distillboard.themeMode'); if(v==='light'||v==='dark'||v==='auto') return v; const legacy=localStorage.getItem('distillboard.dark'); if(legacy!==null) return legacy==='true'?'dark':'light'; return 'auto'; })(),
-  gem: null, uploadedFile: null, startTime: 0,
+  gem: null, uploadedFile: null, startTime: 0, lastRequestFinishedAt: 0,
   // section bookkeeping
   nextSectionId: 1,
   sectionsMeta: [],
@@ -148,6 +152,8 @@ createApp({
 
     // reset
     this.resetDoc(); this.history=[]; this.sections=0; this.tokenTally=0; this.lastAssistant=''; this.trace=[]; this.paused=false; this.running=false; this.sectionsMeta=[]; this.nextSectionId=1; this.anomalyRetryCount=0;
+    this.retrying=false; this.retryAttempt=0; this.retryMax=0; this.retryRemainingMs=0; this.retryPlannedMs=0; this.lastErrorMessage='';
+    this.autoWaiting=false; this.autoWaitRemainingMs=0; this.autoWaitPlannedMs=0; this.lastRequestFinishedAt=0;
     this.status='uploading';
 
     // init Gemini service
@@ -222,6 +228,7 @@ createApp({
     const userFirst = createUserContent([ filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.' ]);
     const req1 = { model: this.model, contents:[ userFirst ], tools: [], config: this.makeConfig() };
     let firstResp=null, firstTries=0, firstText='';
+    await this.maybeAutoWaitBeforeRequest();
     for(let contentAttempts=0;;){
       const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
       if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
@@ -251,6 +258,7 @@ createApp({
     this.sectionsMeta.push({ id: sid1, text: firstText, modelMsg: modelMsg1, userMsgBefore: userFirst, candidatesTokenCount: this.extractCandidatesTokenCount(firstResp) });
     this.sections+=1; this.tokenTally+=estimateTokens(firstText); this.appendDoc(firstText, sid1);
     this.pushTrace({request:this.sanitize(req1), response:firstResp, retries:firstTries});
+    this.lastRequestFinishedAt = Date.now();
     const done = await this.postTurnChecks(firstText); if(done){ this.cleanFinish(); return; }
     this.nextLoop();
   },
@@ -266,6 +274,7 @@ createApp({
       const nextUser = createUserContent([ 'Next' ]);
       const req = { model:this.model, contents:[...this.history, nextUser], tools: [], config: this.makeConfig() };
       let resp=null, tries=0;
+      await this.maybeAutoWaitBeforeRequest();
       for(let contentAttempts=0;;){
         const out = await this.gem.callWithRetries(req).catch(e=>[null,0,e]);
         const r = Array.isArray(out)? out : [null,0,new Error('unknown')];
@@ -309,13 +318,14 @@ createApp({
       this.sectionsMeta.push({ id: sid, text, modelMsg, userMsgBefore: nextUser, candidatesTokenCount: this.extractCandidatesTokenCount(resp) });
       this.sections+=1; this.tokenTally+=estimateTokens(text); this.appendDoc(text, sid);
       this.pushTrace({request:this.sanitize(req), response:resp, retries:tries});
+      this.lastRequestFinishedAt = Date.now();
       const done = await this.postTurnChecks(text); if(done) break;
     }
     this.cleanFinish();
   },
 
   togglePause(){ this.paused=!this.paused; toast(this.paused?'Paused':'Resumed', 'info'); if(!this.paused && this.running) this.nextLoop(); },
-  stop(){ this.running=false; this.status='stopped'; toast('Stopped','warn'); },
+  stop(){ this.running=false; this.retrying=false; this.autoWaiting=false; this.autoWaitRemainingMs=0; this.autoWaitPlannedMs=0; this.status='stopped'; toast('Stopped','warn'); },
   resumeOrStart(){
     if(this.running){
       if(this.paused) this.togglePause();
@@ -328,9 +338,38 @@ createApp({
   sanitize(req){ return JSON.parse(JSON.stringify(req)); },
   makeConfig(){ const cfg={ systemInstruction: this.prompt }; if(this.useTemperature){ cfg.generationConfig={ temperature: Number(this.temperature)||0 }; } return cfg; },
   applyTheme(){ const preferDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches; const isDark = this.themeMode==='dark' || (this.themeMode==='auto' && preferDark); document.body.classList.toggle('dark', isDark); },
-  persist(){ try{ localStorage.setItem('distillboard.prompt', this.prompt||''); localStorage.setItem('distillboard.model', this.model||''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature??'')); localStorage.setItem('distillboard.themeMode', this.themeMode||'auto'); localStorage.removeItem('distillboard.dark'); }catch{} },
+  persist(){ try{ localStorage.setItem('distillboard.prompt', this.prompt||''); localStorage.setItem('distillboard.model', this.model||''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature??'')); localStorage.setItem('distillboard.themeMode', this.themeMode||'auto'); localStorage.setItem('distillboard.autoWaitBetweenRequests', String(!!this.autoWaitBetweenRequests)); localStorage.removeItem('distillboard.dark'); }catch{} },
   serializeErr(e){ if(!e) return {message:'unknown'}; if(typeof e==='string') return {message:e}; return { message: e.message||'unknown', name:e.name||'Error', raw:e?.response||e?.toString?.() }; },
   pushTrace({request,response,error,retries}){ const ts=new Date().toISOString(); this.trace.push({ts,request,response,error,retries}); },
+
+  async maybeAutoWaitBeforeRequest(){
+    if(!this.autoWaitBetweenRequests) return;
+    if(!this.running || this.paused) return;
+    if(!this.lastRequestFinishedAt) return;
+    const elapsed = Date.now() - this.lastRequestFinishedAt;
+    const waitMs = AUTO_WAIT_MS - elapsed;
+    if(waitMs <= 0) return;
+    await this.autoSpacingWait(waitMs);
+  },
+
+  async autoSpacingWait(ms){
+    if(ms<=0) return;
+    const prevStatus = this.status;
+    if(this.running && !this.paused) this.status = 'waiting (auto-spacing)';
+    this.autoWaiting = true;
+    this.autoWaitPlannedMs = ms;
+    this.autoWaitRemainingMs = ms;
+    const step = 250;
+    let remain = ms;
+    while(remain>0 && this.running && !this.paused){ await sleep(step); remain -= step; this.autoWaitRemainingMs = remain; }
+    this.autoWaitRemainingMs = Math.max(0, remain);
+    this.autoWaitPlannedMs = 0;
+    this.autoWaiting = false;
+    if(this.running && !this.paused){
+      if(prevStatus === 'running' || prevStatus === 'waiting (auto-spacing)') this.status = 'running';
+      else this.status = prevStatus;
+    }
+  },
 
   // backoff UI helper (retry timings are driven by gemini service via onTransient)
   async backoffWait(ms){
@@ -349,10 +388,11 @@ createApp({
     this.lastAssistant = text; return false;
   },
 
-  cleanFinish(){ this.running=false; this.retrying=false; if(this.status==='running') this.status='stopped'; },
+  cleanFinish(){ this.running=false; this.retrying=false; this.autoWaiting=false; if(this.status==='running') this.status='stopped'; },
   finishWithError(err, req, retries){
     // Pause instead of aborting on errors
     this.retrying=false;
+    this.autoWaiting=false; this.autoWaitRemainingMs=0; this.autoWaitPlannedMs=0;
     this.paused=true;
     this.status='paused (error)';
     this.lastErrorMessage = err?.message || 'unknown';

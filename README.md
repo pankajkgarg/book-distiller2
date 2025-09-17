@@ -31,7 +31,7 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
   - Step 2 — choose a model
   - Step 3 — upload your book (PDF/EPUB)
   - Step 4 — edit the prompt
-  - Advanced (collapsed): temperature (enabled by default at 1.0), end marker, budgets, anomaly pause toggle
+  - Advanced (collapsed): temperature (enabled by default at 1.0), end marker, budgets, anomaly pause toggle, optional 60s auto-wait between requests
 
 ## Export
 

@@ -3,6 +3,18 @@
 import { GoogleGenAI, createUserContent, createPartFromUri } from 'https://esm.run/@google/genai@0.14.1';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const TRANSIENT_STATUS_STRINGS = new Set([
+  'RESOURCE_EXHAUSTED',
+  'INTERNAL',
+  'UNAVAILABLE',
+  'ABORTED',
+  'DEADLINE_EXCEEDED'
+]);
+
+const isTransientStatusString = value => {
+  if(!value) return false;
+  return TRANSIENT_STATUS_STRINGS.has(String(value).toUpperCase());
+};
 
 function parseRetryDelay(err){
   try{
@@ -45,10 +57,11 @@ function isTransient(err){
         if(n===429 || n===408 || n===425) return true;
         if(n>=500 && n<600) return true;
       }
+      if(isTransientStatusString(c)) return true;
     }
   }
-  const status = err?.error?.status || err?.statusText;
-  if(status==='RESOURCE_EXHAUSTED' || status==='INTERNAL' || status==='UNAVAILABLE' || status==='ABORTED') return true;
+  const status = err?.error?.status || err?.status || err?.statusText;
+  if(isTransientStatusString(status)) return true;
   if(typeof navigator!=='undefined' && navigator.onLine===false) return true;
   return false;
 }

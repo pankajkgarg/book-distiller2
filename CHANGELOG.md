@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2025-09-17
+- fix: treat root-level Gemini error status strings (e.g., `RESOURCE_EXHAUSTED`) as transient so auto-retries trigger again.
+- feat: add an “Auto wait 60s between requests” toggle with a visible countdown before the next turn.
+
 ## 2025-08-21
 - feat: auto-retry 429 and 5xx with a fixed 60s wait and visible countdown; only pause and show “Resume” after 5 failed attempts.
 - docs: clarify retry behavior in README (fixed 60s for 429/5xx with 5 attempts; exponential for others).

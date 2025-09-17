@@ -13,6 +13,7 @@ This document is the authoritative description of how the app orchestrates Gemin
 - API key is stored in `localStorage` under `distillboard.gemini_key`.
 - The system prompt is sent as `systemInstruction`. Temperature is applied only when the toggle is on.
 - An empty `tools: []` is always sent to avoid search grounding.
+- Optional auto spacing: enabling “Auto wait 60s between requests” enforces a 60-second countdown between completed turns before issuing the next Gemini call and surfaces a status bar while waiting.
 
 ## Upload and Processing
 
