@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- fix: auto wait 60s now includes time taken by previous request (starts counting from when request begins, not when it ends)
+
+## 2025-09-30
+- fix: ensure 429/5xx errors always wait the full 60s before retrying (even during upload) and pause only after 4 consecutive failures.
+- docs: update retry-limit documentation to reflect the 4-attempt cap for rate/server overload responses.
+
 ## 2025-09-17
 - fix: treat root-level Gemini error status strings (e.g., `RESOURCE_EXHAUSTED`) as transient so auto-retries trigger again.
 - feat: add an “Auto wait 60s between requests” toggle with a visible countdown before the next turn.

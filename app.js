@@ -49,7 +49,7 @@ createApp({
   useTemperature: (()=>{ const v=localStorage.getItem('distillboard.useTemperature'); return (v===null)? true : (v==='true'); })(),
   temperature: +(localStorage.getItem('distillboard.temperature')||'1.0'),
   themeMode: (()=>{ const v=localStorage.getItem('distillboard.themeMode'); if(v==='light'||v==='dark'||v==='auto') return v; const legacy=localStorage.getItem('distillboard.dark'); if(legacy!==null) return legacy==='true'?'dark':'light'; return 'auto'; })(),
-  gem: null, uploadedFile: null, startTime: 0, lastRequestFinishedAt: 0,
+  gem: null, uploadedFile: null, startTime: 0, lastRequestStartedAt: 0,
   // section bookkeeping
   nextSectionId: 1,
   sectionsMeta: [],
@@ -153,7 +153,7 @@ createApp({
     // reset
     this.resetDoc(); this.history=[]; this.sections=0; this.tokenTally=0; this.lastAssistant=''; this.trace=[]; this.paused=false; this.running=false; this.sectionsMeta=[]; this.nextSectionId=1; this.anomalyRetryCount=0;
     this.retrying=false; this.retryAttempt=0; this.retryMax=0; this.retryRemainingMs=0; this.retryPlannedMs=0; this.lastErrorMessage='';
-    this.autoWaiting=false; this.autoWaitRemainingMs=0; this.autoWaitPlannedMs=0; this.lastRequestFinishedAt=0;
+    this.autoWaiting=false; this.autoWaitRemainingMs=0; this.autoWaitPlannedMs=0; this.lastRequestStartedAt=0;
     this.status='uploading';
 
     // init Gemini service
@@ -166,8 +166,8 @@ createApp({
         const code = Number(rawCode);
         const isRateOrServer = Number.isFinite(code) && (code===429 || (code>=500 && code<600));
 
-        // Policy: for 429/5xx, use fixed 60s retry and cap at 5 attempts
-        const MAX_AUTO_RETRIES = 5;
+        // Policy: for 429/5xx, use fixed 60s retry and cap at 4 attempts
+        const MAX_AUTO_RETRIES = 4;
         const plannedWait = isRateOrServer ? 60000 : waitMs;
 
         this.retrying = true;
@@ -175,9 +175,16 @@ createApp({
         this.retryMax = isRateOrServer ? MAX_AUTO_RETRIES : '∞';
         this.lastErrorMessage = err?.error?.message || err?.message || 'Temporary error';
 
+        const statusLabel = isRateOrServer
+          ? (code === 429 ? 'rate limited' : 'server overloaded')
+          : 'transient error';
+        this.status = `retrying (${statusLabel})`;
+
         // If we already reached the cap, pause and surface Resume
         if(isRateOrServer && (attempt+1) >= MAX_AUTO_RETRIES){
           this.retrying = false;
+          this.retryRemainingMs = 0;
+          this.retryPlannedMs = 0;
           this.paused = true;
           this.status = 'paused (auto-retry limit reached)';
           toast('Auto-retry limit reached. Click Resume to continue.','warn',7000);
@@ -229,6 +236,7 @@ createApp({
     const req1 = { model: this.model, contents:[ userFirst ], tools: [], config: this.makeConfig() };
     let firstResp=null, firstTries=0, firstText='';
     await this.maybeAutoWaitBeforeRequest();
+    this.lastRequestStartedAt = Date.now();
     for(let contentAttempts=0;;){
       const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
       if(r1err){ if(String(r1err?.message)==='__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
@@ -275,6 +283,7 @@ createApp({
       const req = { model:this.model, contents:[...this.history, nextUser], tools: [], config: this.makeConfig() };
       let resp=null, tries=0;
       await this.maybeAutoWaitBeforeRequest();
+      this.lastRequestStartedAt = Date.now();
       for(let contentAttempts=0;;){
         const out = await this.gem.callWithRetries(req).catch(e=>[null,0,e]);
         const r = Array.isArray(out)? out : [null,0,new Error('unknown')];
@@ -345,8 +354,8 @@ createApp({
   async maybeAutoWaitBeforeRequest(){
     if(!this.autoWaitBetweenRequests) return;
     if(!this.running || this.paused) return;
-    if(!this.lastRequestFinishedAt) return;
-    const elapsed = Date.now() - this.lastRequestFinishedAt;
+    if(!this.lastRequestStartedAt) return;
+    const elapsed = Date.now() - this.lastRequestStartedAt;
     const waitMs = AUTO_WAIT_MS - elapsed;
     if(waitMs <= 0) return;
     await this.autoSpacingWait(waitMs);
@@ -373,9 +382,20 @@ createApp({
 
   // backoff UI helper (retry timings are driven by gemini service via onTransient)
   async backoffWait(ms){
-    this.retrying=true; this.retryMax='∞'; this.retryRemainingMs=ms; this.retryPlannedMs=ms;
-    const step=250; let remain=ms;
-    while(remain>0 && this.running && !this.paused){ await sleep(step); remain-=step; this.retryRemainingMs=remain; }
+    this.retrying = true;
+    if(!this.retryMax) this.retryMax = '∞';
+    this.retryPlannedMs = ms;
+    this.retryRemainingMs = ms;
+    const step = 250;
+    let remain = ms;
+    while(remain>0 && !this.paused && (this.running || this.retrying)){
+      const delta = Math.min(step, remain);
+      await sleep(delta);
+      remain = Math.max(0, remain - delta);
+      this.retryRemainingMs = remain;
+    }
+    this.retryRemainingMs = Math.max(0, remain);
+    if(remain<=0){ this.retryPlannedMs = 0; }
   },
 
   async postTurnChecks(text){
