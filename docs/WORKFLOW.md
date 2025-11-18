@@ -5,7 +5,7 @@ This document is the authoritative description of how the app orchestrates Gemin
 ## Overview
 
 - Frontend stack: Petite‑Vue app (`app.js`) + a thin Gemini service wrapper (`gemini.js`).
-- Models: `gemini-2.5-pro` (default), `gemini-2.5-flash`, `gemini-2.5-flash-lite`.
+- Models: `gemini-3-pro-preview`, `gemini-2.5-pro` (default), `gemini-2.5-flash`, `gemini-2.5-flash-lite`.
 - The app uploads a book file (PDF/EPUB), then iterates sections by sending a first turn with the file and subsequent turns with only `"Next"`.
 
 ## Setup

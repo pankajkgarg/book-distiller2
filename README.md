@@ -32,6 +32,7 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
   - Step 3 — upload your book (PDF/EPUB)
   - Step 4 — edit the prompt
   - Advanced (collapsed): temperature (enabled by default at 1.0), end marker, budgets, anomaly pause toggle, optional 60s auto-wait between requests
+- Supported models: `gemini-3-pro-preview`, `gemini-2.5-pro` (default), `gemini-2.5-flash`, and `gemini-2.5-flash-lite`.
 
 ## Export
 
