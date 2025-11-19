@@ -46,8 +46,8 @@ See `docs/WORKFLOW.md` for the authoritative description of the request flow, re
 
 - If you open `index.html` via `file://`, browsers block ESM scripts (CORS). Use the dev server (`npm run dev`) or any static server (e.g., `python3 -m http.server`).
 - Ensure your network allows access to the CDNs and Google APIs.
- - Transient API errors auto‑retry with clear feedback:
-  - 429 and 5xx: fixed 60s waits with a visible countdown, up to 5 automatic attempts; after that, the run pauses and shows “Resume”.
+- Transient API errors auto‑retry with clear feedback:
+  - 429 and 5xx: fixed 60s waits with a visible countdown, up to 4 automatic attempts; after that, the run pauses and shows “Resume”.
   - Network/other transient conditions: exponential backoff with a visible countdown.
  - Content anomalies:
    - Short/empty output: rejected and retried automatically (60s × 5) before pausing.
