@@ -62,6 +62,7 @@ createApp({
   get endMarkerEscaped() { return this.endMarker.replace(/^<|>$/g, ''); },
 
   savedKeys: JSON.parse(localStorage.getItem('distillboard.saved_keys') || '[]'),
+  savedPrompts: JSON.parse(localStorage.getItem('distillboard.saved_prompts') || '[]'),
 
   // methods
   // Pull candidatesTokenCount from the raw Gemini response (best-effort)
@@ -111,6 +112,40 @@ createApp({
     localStorage.setItem('distillboard.saved_keys', JSON.stringify(this.savedKeys));
   },
   clearKey() { localStorage.removeItem('distillboard.gemini_key'); this.apiKey = ''; toast('API key cleared', 'good'); },
+
+  savePrompt() {
+    const p = this.prompt.trim();
+    if (!p) { toast('Empty prompt not saved', 'warn'); return; }
+
+    // Check if prompt already exists (by content)
+    const existing = this.savedPrompts.find(s => s.text === p);
+    if (existing) {
+      toast('Prompt already saved as "' + existing.label + '"', 'info');
+      return;
+    }
+
+    const label = prompt('Enter a label for this prompt:', 'My Custom Prompt');
+    if (label === null) return; // cancelled
+
+    const newEntry = { label: label || 'Untitled', text: p, created: Date.now() };
+    this.savedPrompts.push(newEntry);
+    this.persistPrompts();
+
+    toast('Prompt saved', 'good');
+  },
+  deletePrompt(index) {
+    this.savedPrompts.splice(index, 1);
+    this.persistPrompts();
+    toast('Prompt deleted', 'info');
+  },
+  loadPrompt(entry) {
+    this.prompt = entry.text;
+    this.persist(); // saves current prompt to localStorage
+    toast('Loaded prompt: ' + entry.label, 'info');
+  },
+  persistPrompts() {
+    localStorage.setItem('distillboard.saved_prompts', JSON.stringify(this.savedPrompts));
+  },
   onFileChange(e) { const f = e.target.files?.[0]; this.fileBlob = f || null; this.fileInfo = f ? `${f.name} • ${(f.type || '').replace('application/', '')} • ${(f.size / 1048576).toFixed(2)} MB` : ''; },
   toggleTrace() { const t = $('#trace'); t.classList.toggle('open'); t?.setAttribute?.('aria-hidden', t.classList.contains('open') ? 'false' : 'true'); },
   openTrace() { const t = $('#trace'); t.classList.add('open'); t?.setAttribute?.('aria-hidden', 'false'); },
