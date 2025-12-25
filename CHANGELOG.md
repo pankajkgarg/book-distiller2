@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - feat: include the `gemini-3-pro-preview` model option in the UI and docs.
+- feat: add the `gemini-3-flash-preview` model option alongside other Gemini choices.
 
 ### Fixed
 - fix: auto wait 60s now includes time taken by previous request (starts counting from when request begins, not when it ends)
