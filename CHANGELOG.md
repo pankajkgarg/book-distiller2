@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- feat: add `gemini-3.1-pro-preview` as a selectable model in settings (Vue + legacy UI) and model validation.
 - feat: include the `gemini-3-pro-preview` model option in the UI and docs.
 - feat: add the `gemini-3-flash-preview` model option alongside other Gemini choices.
 
