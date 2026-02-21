@@ -111,6 +111,7 @@ function confirmSaveKey() {
 
           <label>Model</label>
           <select :value="model" @change="$emit('update:model', $event.target.value)">
+            <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
             <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
             <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
             <option value="gemini-2.5-pro">gemini-2.5-pro</option>
