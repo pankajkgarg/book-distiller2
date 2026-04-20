@@ -5,10 +5,15 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- feat: include the `gemini-3-pro-preview` model option in the UI and docs.
+- feat: add provider selection with `Google AI Studio` and `OpenRouter`.
+- feat: add source mode selection with `Native file` and `Extracted text`.
+- feat: add browser-side PDF and EPUB text extraction with local word/token estimates.
+- feat: add dynamic OpenRouter model loading and provider-scoped API key storage.
+- test: add Playwright E2E coverage for local extraction, provider validation, model refresh, and a real OpenRouter smoke path.
 
 ### Fixed
 - fix: auto wait 60s now includes time taken by previous request (starts counting from when request begins, not when it ends)
+- docs: rewrite README and workflow docs for multi-provider and local extraction behavior.
 
 ## 2025-09-30
 - fix: ensure 429/5xx errors always wait the full 60s before retrying (even during upload) and pause only after 4 consecutive failures.
