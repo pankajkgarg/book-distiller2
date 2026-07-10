@@ -8,11 +8,35 @@ All notable changes to this project will be documented in this file.
 - feat: add provider selection with `Google AI Studio` and `OpenRouter`.
 - feat: add source mode selection with `Native file` and `Extracted text`.
 - feat: add browser-side PDF and EPUB text extraction with local word/token estimates.
+- feat: add a headless `codex exec` book-summary script for PDF, EPUB, TXT, and Markdown sources.
+- feat: report headless summary token usage, including book-token estimate, turns, input, cached input, cache-write input, output, and reasoning output.
+- feat: write headless summaries as `<Book Name> - summary - <lang>.md` and support translated summaries with `--language`.
+- feat: support prompt placeholders for generated headless source-boundary and language instructions.
+- feat: add OpenRouter provider support to the headless summary script, including all OpenRouter model ids and a model-list command.
+- feat: enable OpenRouter Claude prompt caching by default with the standard 5-minute TTL in the browser app and headless summary script.
+- feat: add direct DeepSeek provider support for headless summaries, including dotenv key loading.
+- feat: default chat-completions headless runs to omit `max_tokens`; `--max-output-tokens` is opt-in for explicit caps.
+- feat: add chat-completions retry support and `--resume-run` checkpoint resume for headless book-summary runs.
+- fix: add a source-boundary prompt suffix to headless runs so excerpt summaries do not infer missing chapters.
+- fix: send OpenRouter headless calls as plain prompt + source, with no suffix after the book Markdown.
 - feat: add dynamic OpenRouter model loading and provider-scoped API key storage.
 - test: add Playwright E2E coverage for local extraction, provider validation, model refresh, and a real OpenRouter smoke path.
+- feat: limit OpenRouter model picker to models added in the last 12 months and add inline model search filtering.
+- feat: make the headless script a first-class `book-distill` CLI: `bin` entry for `npm link`, optional `--prompt` with the browser app's built-in distillation prompt as fallback (shared via `core.js`).
+- test: restore the Vitest unit-test pipeline (`npm test`) and add coverage for model recency/search filtering.
+- ci: add a GitHub Actions workflow running unit and mocked E2E tests on push/PR.
 
 ### Fixed
 - fix: auto wait 60s now includes time taken by previous request (starts counting from when request begins, not when it ends)
+- fix: clear the retry banner and `retrying` status once a request succeeds after transient retries.
+- fix: send the documented `X-Title` attribution header to OpenRouter instead of `X-OpenRouter-Title`.
+- fix: percent-decode EPUB manifest hrefs so chapters with encoded filenames are not silently dropped (browser and headless extractors).
+- fix: headless script no longer crashes with EPIPE when `codex` exits before reading stdin, honors `--retries 0` on resume, and persists `--codex-bin` in run metadata.
+- fix: ignore `.env`, `temp/`, `trash/`, and Playwright output dirs in git.
+- fix: make E2E model-list stubs use clock-relative `created` dates so the 12-month recency filter does not rot the tests.
+- fix: support namespace-prefixed OPF/NCX tags in the headless EPUB extractor.
+- fix: remove unused Vue plugin dependency from Vite configs so `npm run dev` works in the static Petite-Vue app checkout.
+- test: make Playwright start its own Vite server by default instead of reusing any existing process on port `4173`, so local E2E catches dev-server startup failures.
 - docs: rewrite README and workflow docs for multi-provider and local extraction behavior.
 
 ## 2025-09-30
