@@ -264,15 +264,20 @@
             <div class="muted" style="font-size:12px;margin-top:4px">Stored locally in your browser.</div>
 
             <label>Model</label>
+            <input v-if="provider === 'openrouter'" v-model.trim="modelQuery" data-testid="model-search-input" type="text"
+              placeholder="Filter recent OpenRouter models…" style="margin-bottom:8px" />
             <select data-testid="model-select" v-model="model">
-              <option v-if="availableModels.length === 0" value="" disabled>No models available</option>
-              <option v-for="item in availableModels" :key="item.id" :value="item.id">{{ item.label }}{{ item.supportsFile ? ' • file' : '' }}</option>
+              <option v-if="visibleModels.length === 0" value="" disabled>{{ provider === 'openrouter' && availableModels.length > 0 ? 'No models match filter' : 'No models available' }}</option>
+              <option v-for="item in visibleModels" :key="item.id" :value="item.id">{{ item.label }}{{ item.supportsFile ? ' • file' : '' }}</option>
             </select>
             <div class="muted" style="font-size:12px;margin-top:4px">
               <span v-if="modelLoading">Loading models…</span>
               <span v-else-if="selectedModelMeta && provider === 'openrouter'">
                 Context: {{ Number(selectedModelMeta.contextLength || 0).toLocaleString() }}
                 <template v-if="selectedModelMeta.supportsFile"> • file input</template>
+              </span>
+              <span v-if="provider === 'openrouter' && !modelLoading">
+                Showing {{ visibleModels.length }} of {{ availableModels.length }} models from the last 12 months.
               </span>
               <span v-if="modelLoadError"> {{ modelLoadError }}</span>
             </div>

@@ -7,6 +7,7 @@ import {
   SOURCE_MODE_EXTRACTED,
   SOURCE_MODE_NATIVE,
   getFileKind,
+  filterRecentOpenRouterModels,
   normalizeOpenRouterModel,
   sleep,
   sortOpenRouterModels,
@@ -136,6 +137,15 @@ function extractOpenRouterText(response) {
   return response?.text || '';
 }
 
+function isOpenRouterClaudeModel(model) {
+  return /^anthropic\/claude-/i.test(String(model || ''));
+}
+
+function openRouterClaudeCacheControl(model) {
+  if (!isOpenRouterClaudeModel(model)) return null;
+  return { type: 'ephemeral' };
+}
+
 async function fileToDataUrl(file) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -179,6 +189,7 @@ async function listOpenRouterModels({ sourceMode }) {
   let models = (payload?.data || [])
     .map(normalizeOpenRouterModel)
     .filter(model => model.id && model.supportsText);
+  models = filterRecentOpenRouterModels(models);
   if (preferFile) models = models.filter(model => model.supportsFile);
   return sortOpenRouterModels(models, { preferFile });
 }
@@ -355,6 +366,8 @@ const openRouterProvider = {
       messages: [{ role: 'system', content: prompt }, ...history, userMessage],
       stream: false,
     };
+    const cacheControl = openRouterClaudeCacheControl(model);
+    if (cacheControl) request.cache_control = cacheControl;
     if (useTemperature) request.temperature = Number(temperature) || 0;
     return request;
   },
@@ -363,7 +376,7 @@ const openRouterProvider = {
       const headers = {
         Authorization: `Bearer ${session.apiKey}`,
         'Content-Type': 'application/json',
-        'X-OpenRouter-Title': 'DistillBoard',
+        'X-Title': 'DistillBoard',
       };
       if (typeof location !== 'undefined' && location.origin) headers['HTTP-Referer'] = location.origin;
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {

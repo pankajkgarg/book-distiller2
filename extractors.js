@@ -39,7 +39,12 @@ function normalizeZipPath(path) {
 
 function resolveZipPath(baseFilePath, relativePath) {
   const base = normalizeZipPath(baseFilePath);
-  const relative = normalizeZipPath(String(relativePath || '').split('#')[0].split('?')[0]);
+  // EPUB hrefs are URIs, so percent-encoded names must be decoded to match zip entries.
+  let rawRelative = String(relativePath || '').split('#')[0].split('?')[0];
+  try {
+    rawRelative = decodeURIComponent(rawRelative);
+  } catch { }
+  const relative = normalizeZipPath(rawRelative);
   if (!relative) return '';
   if (!base) return relative;
   const baseParts = base.split('/').slice(0, -1);

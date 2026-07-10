@@ -2,6 +2,7 @@ export const GOOGLE_PROVIDER = 'google-ai-studio';
 export const OPENROUTER_PROVIDER = 'openrouter';
 export const SOURCE_MODE_NATIVE = 'native-file';
 export const SOURCE_MODE_EXTRACTED = 'extracted-text';
+export const OPENROUTER_RECENT_MONTHS = 12;
 
 export const PROVIDER_LABELS = {
   [GOOGLE_PROVIDER]: 'Google AI Studio',
@@ -226,14 +227,46 @@ export function normalizeOpenRouterModel(model) {
   const modalities = model?.architecture?.input_modalities || [];
   const supportsText = modalities.includes('text');
   const supportsFile = modalities.includes('file');
+  const createdAt = normalizeTimestamp(model?.created);
   return {
     id: model?.id || '',
     label: model?.name || model?.id || 'Unnamed model',
     supportsText,
     supportsFile,
+    createdAt,
     contextLength: Number(model?.context_length || model?.top_provider?.context_length || 0) || 0,
     raw: model,
   };
+}
+
+export function normalizeTimestamp(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric < 1e12 ? Math.floor(numeric * 1000) : Math.floor(numeric);
+}
+
+export function getRecentMonthsCutoff(nowMs = Date.now(), months = OPENROUTER_RECENT_MONTHS) {
+  const cutoff = new Date(nowMs);
+  cutoff.setMonth(cutoff.getMonth() - months);
+  return cutoff.getTime();
+}
+
+export function filterRecentOpenRouterModels(models, { nowMs = Date.now(), months = OPENROUTER_RECENT_MONTHS } = {}) {
+  const cutoff = getRecentMonthsCutoff(nowMs, months);
+  return (models || []).filter(model => Number(model?.createdAt || 0) >= cutoff);
+}
+
+export function filterModelsByQuery(models, query) {
+  const terms = String(query || '')
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (terms.length === 0) return [...(models || [])];
+  return (models || []).filter(model => {
+    const haystack = `${model?.label || ''} ${model?.id || ''}`.toLowerCase();
+    return terms.every(term => haystack.includes(term));
+  });
 }
 
 export function sortOpenRouterModels(models, { preferFile = false } = {}) {
@@ -253,3 +286,6 @@ export function chooseModel(currentModel, models, fallbackModel = '') {
 export function resolveSourceModeLabel(sourceMode) {
   return sourceMode === SOURCE_MODE_EXTRACTED ? 'Extracted text' : 'Native file';
 }
+
+// Default distillation prompt shared by the browser app and the book-distill CLI.
+export const DEFAULT_PROMPT = `# Book Deep-Dive Exploration Prompt\n\n**Your Mission:** You are tasked with creating an immersive, in-depth exploration of a book I provide. Your goal is to channel the author's voice and produce a series of thematic deep-dives that, when combined, will read as a single, flowing document—like an extended meditation on the book written by the author themselves.\n\n## For the First Response Only\n\n**Structure your first response in two parts:**\n\n### Part 1: Opening the Journey\n- **Book Introduction**: In the author's voice, introduce the book's core premise and why it was written\n- **The Architecture**: Present a roadmap of all major themes/sections that will be covered across our multi-turn exploration, showing how each builds upon the last\n- **Reading Guide**: Briefly explain how these sections work together to form the complete journey\n\n### Part 2: First Thematic Section\n- Proceed with the first major theme following the standard section structure below\n\n## For All Thematic Sections\n\n**Creating Each Section:**\nBegin each section with a **thematic title** that captures the essence of what you're exploring.\n\n## Our Process\n- I'll provide the book source\n- You'll create the first response with both the opening journey overview and the first thematic section\n- When I respond with "Next", identify the next logical theme and create another complete section\n- Each new section should begin in a way that flows naturally from the previous section\n- When you've covered all major themes and the book's journey is complete, respond only with: \`<end_of_book>\`\n\n## Key Principles\n- **The reader should feel they've read the book itself through your responses**\n- Privilege completeness and depth over conciseness\n- Think of the final combined document as the book's essence, distilled but not diluted\n\n## Remember\nYou're not summarizing or studying the book—you're presenting it in its full richness through the author's own eyes. The reader should finish feeling like they've genuinely experienced the book's complete content, receiving all its wisdom, stories, and insights directly from the source material itself.`;

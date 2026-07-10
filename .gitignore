@@ -23,3 +23,15 @@ coverage/
 .tanstack
 .output
 .vercel
+
+# Env / secrets
+.env
+.env.*
+
+# Project scratch dirs (see AGENTS.md conventions)
+temp/
+trash/
+
+# Playwright
+test-results/
+playwright-report/

@@ -3,6 +3,7 @@ import { createApp } from 'https://unpkg.com/petite-vue?module';
 import { analyzeSourceFile } from './extractors.js';
 import {
   chooseModel,
+  DEFAULT_PROMPT,
   combinedSectionsText,
   estimateTokens,
   getDefaultGoogleModel,
@@ -10,6 +11,7 @@ import {
   getProviderLabel,
   getSavedKeysForProvider,
   getStorageKeys,
+  filterModelsByQuery,
   loadProvider,
   loadProviderKeys,
   loadSavedKeys,
@@ -107,8 +109,6 @@ function makePdf(name, md, trace, meta) {
   doc.save(name);
 }
 
-const DEFAULT_PROMPT = `# Book Deep-Dive Exploration Prompt\n\n**Your Mission:** You are tasked with creating an immersive, in-depth exploration of a book I provide. Your goal is to channel the author's voice and produce a series of thematic deep-dives that, when combined, will read as a single, flowing document—like an extended meditation on the book written by the author themselves.\n\n## For the First Response Only\n\n**Structure your first response in two parts:**\n\n### Part 1: Opening the Journey\n- **Book Introduction**: In the author's voice, introduce the book's core premise and why it was written\n- **The Architecture**: Present a roadmap of all major themes/sections that will be covered across our multi-turn exploration, showing how each builds upon the last\n- **Reading Guide**: Briefly explain how these sections work together to form the complete journey\n\n### Part 2: First Thematic Section\n- Proceed with the first major theme following the standard section structure below\n\n## For All Thematic Sections\n\n**Creating Each Section:**\nBegin each section with a **thematic title** that captures the essence of what you're exploring.\n\n## Our Process\n- I'll provide the book source\n- You'll create the first response with both the opening journey overview and the first thematic section\n- When I respond with "Next", identify the next logical theme and create another complete section\n- Each new section should begin in a way that flows naturally from the previous section\n- When you've covered all major themes and the book's journey is complete, respond only with: \`<end_of_book>\`\n\n## Key Principles\n- **The reader should feel they've read the book itself through your responses**\n- Privilege completeness and depth over conciseness\n- Think of the final combined document as the book's essence, distilled but not diluted\n\n## Remember\nYou're not summarizing or studying the book—you're presenting it in its full richness through the author's own eyes. The reader should finish feeling like they've genuinely experienced the book's complete content, receiving all its wisdom, stories, and insights directly from the source material itself.`;
-
 createApp({
   initialized: false,
   providerOptions: getProviderList().map(provider => ({ id: provider.id, label: provider.label })),
@@ -151,6 +151,7 @@ createApp({
   modelLoading: false,
   modelLoadError: '',
   modelRefreshNonce: 0,
+  modelQuery: '',
 
   useTemperature: (() => {
     const value = localStorage.getItem(STORAGE_KEYS.useTemperature);
@@ -194,6 +195,10 @@ createApp({
   },
   get selectedModelMeta() {
     return this.availableModels.find(model => model.id === this.model) || null;
+  },
+  get visibleModels() {
+    if (this.provider !== OPENROUTER_PROVIDER) return this.availableModels;
+    return filterModelsByQuery(this.availableModels, this.modelQuery);
   },
   get extractionStatsSummary() {
     if (!this.fileBlob) return '';
@@ -310,6 +315,7 @@ createApp({
 
   async onProviderChange(event) {
     this.provider = event.target.value;
+    if (this.provider !== OPENROUTER_PROVIDER) this.modelQuery = '';
     this.apiKey = this.providerKeys[this.provider] || '';
     this.persist();
     await this.refreshAvailableModels();
@@ -617,6 +623,15 @@ createApp({
     });
   },
 
+  clearRetryState() {
+    this.retrying = false;
+    this.retryAttempt = 0;
+    this.retryMax = 0;
+    this.retryRemainingMs = 0;
+    this.retryPlannedMs = 0;
+    if (this.running && !this.paused && /^retrying/.test(this.status)) this.status = 'running';
+  },
+
   async ensureExtractedSourceReady() {
     if (this.sourceAnalysisStatus === 'analyzing' && this.sourceAnalysisPromise) {
       await this.sourceAnalysisPromise.catch(() => null);
@@ -765,6 +780,7 @@ createApp({
       firstText = text;
       break;
     }
+    this.clearRetryState();
 
     const modelMsg = this.createAssistantMessage(firstText);
     this.history.push(historyUserFirst);
@@ -863,6 +879,7 @@ createApp({
         text = currentText;
         break;
       }
+      this.clearRetryState();
 
       const modelMsg = this.createAssistantMessage(text);
       this.history.push(nextUser);
