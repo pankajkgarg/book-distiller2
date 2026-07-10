@@ -1,93 +1,219 @@
 # Distiller Workflow and Error Handling
 
-This document is the authoritative description of how the app orchestrates Gemini calls, manages conversation state, and handles errors. If you change related code paths, update this document in the same PR.
+This document is the authoritative description of how the app orchestrates provider calls, local source extraction, conversation history, and retries. If related code changes, update this file in the same PR.
 
 ## Overview
 
-- Frontend stack: Petite‑Vue app (`app.js`) + a thin Gemini service wrapper (`gemini.js`).
-- Models: `gemini-3-pro-preview`, `gemini-3-flash-preview`, `gemini-2.5-pro` (default), `gemini-2.5-flash`, `gemini-2.5-flash-lite`.
-- The app uploads a book file (PDF/EPUB), then iterates sections by sending a first turn with the file and subsequent turns with only `"Next"`.
+- Frontend stack: Petite‑Vue app (`app.js`) with provider adapters (`providers.js`) and browser extractors (`extractors.js`).
+- Providers:
+  - `Google AI Studio`
+  - `OpenRouter`
+- Source modes:
+  - `Native file`
+  - `Extracted text`
+- Supported source files:
+  - PDF
+  - EPUB
 
-## Setup
+## Setup and Persistence
 
-- API key is stored in `localStorage` under `distillboard.gemini_key`.
-- The system prompt is sent as `systemInstruction`. Temperature is applied only when the toggle is on.
-- An empty `tools: []` is always sent to avoid search grounding.
-- Optional auto spacing: enabling “Auto wait 60s between requests” enforces a 60-second countdown between completed turns before issuing the next Gemini call and surfaces a status bar while waiting.
+- Provider persists in `localStorage` under `distillboard.provider`.
+- Source mode persists under `distillboard.source_mode`.
+- API keys are stored per provider in `distillboard.provider_keys`.
+- Legacy `distillboard.gemini_key` is migrated into the Google AI Studio slot on startup.
+- Saved key entries are normalized to `{ label, key, provider, created }`.
+- The distillation prompt persists under `distillboard.prompt`.
+- Temperature is only included when the toggle is enabled.
+- Auto wait, theme, and model selection also persist.
 
-## Upload and Processing
+## Local Source Analysis
 
-1) File is uploaded via Gemini Files API with exponential backoff. Transient errors honor Retry‑After/RetryInfo when provided.
-2) The app polls the file status every 2s until it becomes `ACTIVE` or times out (~4 minutes).
-3) If processing fails (`state === FAILED`), the run pauses with an error.
+The app always tries to analyze the uploaded file locally after selection, even if the eventual run uses `Native file`.
+
+### PDF
+
+- Parsed in the browser with PDF.js.
+- Text is extracted page-by-page.
+- Output preserves light page separators (`--- Page N ---`).
+
+### EPUB
+
+- Parsed in the browser by unpacking the EPUB container and reading the spine documents.
+- XHTML/HTML chapter files are flattened into readable text.
+- Output preserves chapter separators (`--- Chapter N ---`).
+
+### Analysis Result Shape
+
+`extractedSource` is either `null` or:
+
+- `kind`: `pdf` | `epub`
+- `text`
+- `wordCount`
+- `tokenEstimate`
+- `charCount`
+- `pageCount` when available
+- `chapterCount` when available
+- `warnings`
+
+### Counts
+
+- `wordCount`: best-effort count of normalized word-like tokens
+- `tokenEstimate`: approximate `Math.ceil(text.length / 4)`
+
+If local extraction fails:
+
+- counts render as unavailable
+- Google native mode may still run
+- extracted-text mode remains blocked until extraction succeeds
+
+## Provider-Specific Source Handling
+
+### Google AI Studio
+
+#### Native file
+
+1. Upload file through the Gemini Files API.
+2. Poll every 2s until the file leaves `PROCESSING`.
+3. If the file reaches `FAILED`, pause the run with an error.
+4. First turn includes the uploaded file part plus the opening instruction.
+5. Subsequent turns send `"Next"` while preserving history.
+
+#### Extracted text
+
+1. Skip Files API upload entirely.
+2. First turn sends the extracted source text plus the opening instruction.
+3. Subsequent turns send `"Next"` with prior history.
+
+### OpenRouter
+
+#### Native file
+
+- Allowed only for PDF and only when the selected model exposes `file` input support.
+- First turn sends:
+  - opening instruction text
+  - `file` content part with a base64 data URL
+- To avoid resending the base64 PDF on every future turn, the stored first-turn history is replaced with extracted text when local extraction is available.
+
+#### Extracted text
+
+- First turn sends extracted source text plus the opening instruction.
+- Subsequent turns send `"Next"` with prior history.
+
+## Model Loading
+
+### Google AI Studio
+
+- Uses a curated static model list:
+  - `gemini-3-pro-preview`
+  - `gemini-2.5-pro`
+  - `gemini-2.5-flash`
+  - `gemini-2.5-flash-lite`
+
+### OpenRouter
+
+- Loads models dynamically from `https://openrouter.ai/api/v1/models`.
+- Filters to text-capable models.
+- In `Native file` mode, further filters to file-capable models.
+- Sorts with file-capable models first when relevant, then by context length, then by label.
+
+If the current model becomes invalid after provider/source-mode changes, the app picks a valid fallback automatically.
+
+## Run Validation
+
+Before `start()`:
+
+- missing API key → blocked
+- missing file → blocked
+- empty prompt → blocked
+- extracted-text mode without completed local extraction → blocked
+- OpenRouter native mode with EPUB → blocked
+- OpenRouter native mode with non-file-capable model → blocked
 
 ## Turn Structure
 
-- First turn: A single user message that includes the uploaded file part and an instruction to produce the opening and first section.
-- Subsequent turns: A single user message with only `"Next"`. The file is not reattached.
-- Conversation context: Each request includes the full prior `history` so Gemini retains context, including the original file reference from the first turn.
+### First turn
+
+- Sends the opening instruction:
+  - "Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section."
+- Source attachment depends on provider and source mode, as described above.
+
+### Subsequent turns
+
+- Single user message with `"Next"`.
+- Full request history is rebuilt each turn from the app’s stored message history.
+
+## History Rules
+
+- History is only mutated after successful model responses.
+- Failed turns do not append user/model messages.
+- The live document is derived from `sectionsMeta`, not raw provider history.
+- Deleting a section removes its model message from history and removes its prior user `"Next"` message when applicable.
 
 ## Error Handling and Retries
 
-- 429 and 5xx: Automatically retried with a fixed 60s wait and visible countdown, up to 4 attempts. After 4 failed attempts, the run pauses and shows a Resume button.
-- Other transient conditions (Retry‑After/RetryInfo/network/offline): Automatically retried with exponential backoff + jitter. UI shows attempt and countdown.
-- Non‑transient errors: The app pauses the run with status `paused (error)`, surfaces `lastErrorMessage`, and logs the failing request/error in `trace`.
-- Abort semantics: If paused while waiting to retry, the in‑flight operation aborts; no history mutations are made for the failed turn.
+- `429` and `5xx`:
+  - fixed 60s wait
+  - visible countdown
+  - maximum 4 automatic attempts before pausing
+- Other transient conditions:
+  - exponential backoff with jitter
+  - Retry‑After / RetryInfo honored when present
+- Non-transient errors:
+  - pause the run
+  - surface `lastErrorMessage`
+  - log request/error metadata in `trace`
 
-## Invalid File Reference Recovery
+If the app is paused while waiting to retry, the in-flight operation aborts and no history mutation occurs for that failed turn.
 
-Symptoms
-- Errors like `FAILED_PRECONDITION` or messages containing “Unsupported file uri”.
+## Google Native Source Recovery
 
-Handling
-- Re‑upload the original file once.
-- Rewrite any prior user message file parts in `history` to point to the new `uploadedFile.uri` (both `fileData` and legacy `file_data` shapes are supported).
-- Retry the request with unchanged user content (still just `"Next"`).
+Symptoms:
 
-Rationale
-- Later turns omit the file; the original file reference embedded in history must remain valid for Gemini to access content.
+- `FAILED_PRECONDITION`
+- messages containing `Unsupported file uri`
+
+Handling:
+
+1. Re-upload the original file once.
+2. Rewrite prior Google file parts in history to use the new URI.
+3. Retry the request unchanged.
+
+This recovery logic is Google-only.
 
 ## Pausing and Completion
 
-- Completion: When the latest assistant text ends with the end marker (default `<end_of_book>`), status becomes `complete`.
-- Anomaly Pauses (configurable):
-  - Refusal phrasing → `paused (refusal)`.
-  - Very short non‑code output (< 200 chars) → `paused (empty/short)`.
-  - High similarity to prior assistant message (> 0.9 trigram sim) → `paused (loop)`.
+- Completion:
+  - when the latest assistant text ends with the configured end marker
+- Anomaly pauses:
+  - likely refusal phrasing
+  - very short non-code output (`< 200` chars)
+  - high similarity to the prior assistant response (`> 0.9` trigram similarity)
 - Budgets:
-  - Time budget (seconds) → stop with `time budget reached`.
-  - Token budget (rough length/4 estimate) → stop with `token budget reached (est)`.
+  - time budget → stop with `time budget reached`
+  - estimated token budget → stop with `token budget reached (est)`
 
-## State and History Rules
+## Trace and Export
 
-- `history` is only appended on successful model responses. Failing turns do not mutate history.
-- `history`, `sections`, and the live document reset only on a new `start()`.
-- `trace` records every turn or error with request/response/error metadata and retry count; it can be downloaded.
-
-## User Controls
-
-- Start: Validates key, file, and prompt; uploads file; performs first turn.
-- Pause/Resume: Toggles the iterative loop. Resume continues immediately with `"Next"`.
-- Stop: Halts the loop and sets status to `stopped`.
-- Exports: Copy combined text; export Markdown/TXT; export PDF (optionally appending `trace`).
+- `trace` stores request/response/error payloads and retry counts.
+- Trace can be downloaded as JSON.
+- Export metadata includes provider and source mode in addition to model, temperature, sections, and date.
 
 ## Edge Cases
 
-- Network offline → treated as transient; retried until pause/stop.
-- RetryInfo/Retry‑After headers are honored when provided; fallback is exponential backoff with jitter.
-- Long file processing → polled up to ~4 minutes; errors out afterward.
-- First turn failure → no history yet; fix conditions and resume to retry.
-- Re‑upload failure during invalid‑URI handling → pause with error; history remains unchanged.
-- End marker is used as a regex suffix; choose markers without special regex chars unless intended.
-- Token estimation is approximate (length/4).
-- Changing models mid‑run is not recommended; model setting persists for the next run.
+- offline browser state is treated as transient
+- malformed local files can fail extraction while native Google mode still works
+- OpenRouter model fetch failure leaves no dynamic model list for OpenRouter until refresh succeeds
+- changing provider or source mode can invalidate the selected model
+- end marker is interpreted as a regex suffix
+- token estimation is approximate only
 
-## Maintenance: Keep This Doc Updated
+## Maintenance
 
-- If you change:
-  - Turn structure (e.g., reattaching files, prompt shape)
-  - Retry/backoff or transient detection
-  - Invalid file recovery logic
-  - Pause/stop/completion criteria or budgets
-  - State/history semantics
-  …then update this document and reference the PR in `CHANGELOG.md`.
+If you change any of the following, update this document and reference the change in `CHANGELOG.md`:
+
+- provider selection or request shape
+- source-mode behavior
+- local extraction rules
+- retry/backoff logic
+- history semantics
+- completion or pause criteria

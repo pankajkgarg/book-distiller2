@@ -1,259 +1,606 @@
 // Conversation workflow and error handling are documented in docs/WORKFLOW.md
 import { createApp } from 'https://unpkg.com/petite-vue?module';
-import { createGeminiService, createUserContent, createPartFromUri } from './gemini.js';
+import { analyzeSourceFile } from './extractors.js';
+import {
+  chooseModel,
+  DEFAULT_PROMPT,
+  combinedSectionsText,
+  estimateTokens,
+  getDefaultGoogleModel,
+  getFileSignature,
+  getProviderLabel,
+  getSavedKeysForProvider,
+  getStorageKeys,
+  filterModelsByQuery,
+  loadProvider,
+  loadProviderKeys,
+  loadSavedKeys,
+  loadSourceMode,
+  migrateLegacyStorage,
+  normalizeSavedKeys,
+  OPENROUTER_PROVIDER,
+  GOOGLE_PROVIDER,
+  GOOGLE_MODELS,
+  PROVIDER_LABELS,
+  resolveSourceModeLabel,
+  setStoredApiKey,
+  clearStoredApiKey,
+  sim3,
+  sleep,
+  SOURCE_MODE_EXTRACTED,
+  SOURCE_MODE_NATIVE,
+  stripMd,
+  isNextOnlyUserMessage,
+  persistSavedKeys,
+} from './core.js';
+import { getProvider, getProviderList } from './providers.js';
 
-// Helpers
-const $ = s => document.querySelector(s);
-const el = (tag, cls, html) => { const x = document.createElement(tag); if (cls) x.className = cls; if (html !== undefined) x.innerHTML = html; return x; };
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const $ = selector => document.querySelector(selector);
+const el = (tag, cls, html) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html !== undefined) node.innerHTML = html;
+  return node;
+};
+
+const STORAGE_KEYS = getStorageKeys();
 const AUTO_WAIT_MS = 60000;
-const estimateTokens = s => Math.ceil((s || '').length / 4);
-function sim3(a, b) { const grams = s => { const t = (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); const G = new Set(); for (let i = 0; i < Math.max(0, t.length - 2); i++) G.add(t.slice(i, i + 3)); return G; }; const A = grams(a), B = grams(b); const inter = [...A].filter(x => B.has(x)).length; const union = new Set([...A, ...B]).size || 1; return inter / union; }
-function toast(msg, type = 'info', ms = 3500) { const host = $('#toasts'); const n = el('div', `toast ${type}`, msg); host.appendChild(n); setTimeout(() => n.remove(), ms); }
-function stripMd(md) { return (md || '').replace(/[>#*_`~\-]+/g, '').replace(/\n{3,}/g, '\n\n'); }
-function download(name, text, type = 'text/plain;charset=utf-8') { const blob = new Blob([text], { type }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href); }
+const BEGIN_INSTRUCTION = 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.';
+const sourceAnalysisCache = new Map();
+
+function toast(message, type = 'info', ms = 3500) {
+  const host = $('#toasts');
+  const node = el('div', `toast ${type}`, message);
+  host.appendChild(node);
+  setTimeout(() => node.remove(), ms);
+}
+
+function download(name, text, type = 'text/plain;charset=utf-8') {
+  const blob = new Blob([text], { type });
+  const anchor = document.createElement('a');
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(anchor.href);
+}
+
 function makePdf(name, md, trace, meta) {
-  const { jsPDF } = window.jspdf; const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   try {
-    const props = { title: name.replace(/\.[^.]+$/, ''), subject: 'Book excerpt', keywords: (meta ? `Gemini, ${meta.model || ''}` : ''), creator: 'book-distiller-petite-vue' };
-    doc.setProperties && doc.setProperties(props);
+    const keywords = [meta?.provider, meta?.model].filter(Boolean).join(', ');
+    doc.setProperties && doc.setProperties({
+      title: name.replace(/\.[^.]+$/, ''),
+      subject: 'Book excerpt',
+      keywords,
+      creator: 'book-distiller-petite-vue',
+    });
   } catch { }
-  const margin = 56, width = 483; const lines = (stripMd(md) || '(empty)').split('\n'); let y = margin; doc.setFont('Times', 'Normal'); doc.setFontSize(12);
-  for (const line of lines) { const chunk = doc.splitTextToSize(line, width); if (y + chunk.length * 16 > 812) { doc.addPage(); y = margin; } doc.text(chunk, margin, y); y += chunk.length * 16 + 4; }
-  if (trace) { doc.addPage(); doc.setFontSize(11); const t = JSON.stringify(trace, null, 2).split('\n'); let yy = margin; for (const row of t) { const chunk = doc.splitTextToSize(row, width); if (yy + chunk.length * 14 > 812) { doc.addPage(); yy = margin; } doc.text(chunk, margin, yy); yy += chunk.length * 14 + 2; } }
+  const margin = 56;
+  const width = 483;
+  const lines = (stripMd(md) || '(empty)').split('\n');
+  let y = margin;
+  doc.setFont('Times', 'Normal');
+  doc.setFontSize(12);
+  for (const line of lines) {
+    const chunk = doc.splitTextToSize(line, width);
+    if (y + chunk.length * 16 > 812) {
+      doc.addPage();
+      y = margin;
+    }
+    doc.text(chunk, margin, y);
+    y += chunk.length * 16 + 4;
+  }
+  if (trace) {
+    doc.addPage();
+    doc.setFontSize(11);
+    const traceRows = JSON.stringify(trace, null, 2).split('\n');
+    let traceY = margin;
+    for (const row of traceRows) {
+      const chunk = doc.splitTextToSize(row, width);
+      if (traceY + chunk.length * 14 > 812) {
+        doc.addPage();
+        traceY = margin;
+      }
+      doc.text(chunk, margin, traceY);
+      traceY += chunk.length * 14 + 2;
+    }
+  }
   doc.save(name);
 }
 
-const DEFAULT_PROMPT = `# Book Deep-Dive Exploration Prompt\n\n**Your Mission:** You are tasked with creating an immersive, in-depth exploration of a book I provide. Your goal is to channel the author's voice and produce a series of thematic deep-dives that, when combined, will read as a single, flowing document—like an extended meditation on the book written by the author themselves.\n\n## For the First Response Only\n\n**Structure your first response in two parts:**\n\n### Part 1: Opening the Journey\n- **Book Introduction**: In the author's voice, introduce the book's core premise and why it was written\n- **The Architecture**: Present a roadmap of all major themes/sections that will be covered across our multi-turn exploration, showing how each builds upon the last\n- **Reading Guide**: Briefly explain how these sections work together to form the complete journey\n\n### Part 2: First Thematic Section\n- Proceed with the first major theme following the standard section structure below\n\n## For All Thematic Sections\n\n**Creating Each Section:**\nBegin each section with a **thematic title** that captures the essence of what you're exploring.\n\n## Our Process\n- I'll provide the book source\n- You'll create the first response with both the opening journey overview and the first thematic section\n- When I respond with "Next", identify the next logical theme and create another complete section\n- Each new section should begin in a way that flows naturally from the previous section\n- When you've covered all major themes and the book's journey is complete, respond only with: \`<end_of_book>\`\n\n## Key Principles\n- **The reader should feel they've read the book itself through your responses**\n- Privilege completeness and depth over conciseness\n- Think of the final combined document as the book's essence, distilled but not diluted\n\n## Remember\nYou're not summarizing or studying the book—you're presenting it in its full richness through the author's own eyes. The reader should finish feeling like they've genuinely experienced the book's complete content, receiving all its wisdom, stories, and insights directly from the source material itself.`;
-
 createApp({
-  // state
-  apiKey: localStorage.getItem('distillboard.gemini_key') || '',
-  prompt: localStorage.getItem('distillboard.prompt') || DEFAULT_PROMPT,
+  initialized: false,
+  providerOptions: getProviderList().map(provider => ({ id: provider.id, label: provider.label })),
+  provider: loadProvider(),
+  sourceMode: loadSourceMode(),
+  providerKeys: loadProviderKeys(),
+  apiKey: '',
+  prompt: localStorage.getItem(STORAGE_KEYS.prompt) || DEFAULT_PROMPT,
   endMarker: '<end_of_book>',
   budgetTokens: '',
   budgetTime: '',
   pauseOnAnomaly: true,
-  autoWaitBetweenRequests: localStorage.getItem('distillboard.autoWaitBetweenRequests') === 'true',
-  isSettingsOpen: !localStorage.getItem('distillboard.gemini_key'),
+  autoWaitBetweenRequests: localStorage.getItem(STORAGE_KEYS.autoWaitBetweenRequests) === 'true',
+  isSettingsOpen: true,
 
-  status: 'idle', sections: 0, tokenTally: 0,
-  running: false, paused: false,
-  history: [], lastAssistant: '',
-  fileBlob: null, fileInfo: '',
+  status: 'idle',
+  sections: 0,
+  tokenTally: 0,
+  running: false,
+  paused: false,
+  history: [],
+  lastAssistant: '',
+  fileBlob: null,
+  fileInfo: '',
   trace: [],
-  // retry/backoff UI state
-  retrying: false, retryAttempt: 0, retryMax: 0, retryRemainingMs: 0, retryPlannedMs: 0,
-  // auto-wait UI state
-  autoWaiting: false, autoWaitRemainingMs: 0, autoWaitPlannedMs: 0,
+
+  retrying: false,
+  retryAttempt: 0,
+  retryMax: 0,
+  retryRemainingMs: 0,
+  retryPlannedMs: 0,
+
+  autoWaiting: false,
+  autoWaitRemainingMs: 0,
+  autoWaitPlannedMs: 0,
   lastErrorMessage: '',
 
-  model: (() => { const allowed = ['gemini-3.1-pro-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']; const saved = localStorage.getItem('distillboard.model'); return allowed.includes(saved) ? saved : 'gemini-2.5-pro'; })(),
-  useTemperature: (() => { const v = localStorage.getItem('distillboard.useTemperature'); return (v === null) ? true : (v === 'true'); })(),
-  temperature: +(localStorage.getItem('distillboard.temperature') || '1.0'),
-  themeMode: (() => { const v = localStorage.getItem('distillboard.themeMode'); if (v === 'light' || v === 'dark' || v === 'auto') return v; const legacy = localStorage.getItem('distillboard.dark'); if (legacy !== null) return legacy === 'true' ? 'dark' : 'light'; return 'auto'; })(),
-  gem: null, uploadedFile: null, startTime: 0, lastRequestStartedAt: 0,
-  // section bookkeeping
+  availableModels: [],
+  model: localStorage.getItem(STORAGE_KEYS.model) || getDefaultGoogleModel(),
+  modelLoading: false,
+  modelLoadError: '',
+  modelRefreshNonce: 0,
+  modelQuery: '',
+
+  useTemperature: (() => {
+    const value = localStorage.getItem(STORAGE_KEYS.useTemperature);
+    return value === null ? true : value === 'true';
+  })(),
+  temperature: +(localStorage.getItem(STORAGE_KEYS.temperature) || '1.0'),
+  themeMode: (() => {
+    const value = localStorage.getItem(STORAGE_KEYS.themeMode);
+    if (value === 'light' || value === 'dark' || value === 'auto') return value;
+    const legacy = localStorage.getItem('distillboard.dark');
+    if (legacy !== null) return legacy === 'true' ? 'dark' : 'light';
+    return 'auto';
+  })(),
+
+  providerSession: null,
+  nativeSource: null,
+  startTime: 0,
+  lastRequestStartedAt: 0,
   nextSectionId: 1,
   sectionsMeta: [],
-  anomalyRetryCount: 0,
 
-  // computed
-  get endMarkerEscaped() { return this.endMarker.replace(/^<|>$/g, ''); },
+  savedKeys: loadSavedKeys(),
+  savedPrompts: JSON.parse(localStorage.getItem(STORAGE_KEYS.savedPrompts) || '[]'),
 
-  savedKeys: JSON.parse(localStorage.getItem('distillboard.saved_keys') || '[]'),
-  savedPrompts: JSON.parse(localStorage.getItem('distillboard.saved_prompts') || '[]'),
+  sourceAnalysisStatus: 'idle',
+  sourceAnalysisError: '',
+  sourceAnalysisPromise: null,
+  extractedSource: null,
 
-  // methods
-  // Pull candidatesTokenCount from the raw Gemini response (best-effort)
-  extractCandidatesTokenCount(resp) {
-    try {
-      const raw = resp?.raw || resp || {};
-      const direct = raw?.candidatesTokenCount ?? resp?.candidatesTokenCount;
-      if (Number.isFinite(Number(direct))) return Number(direct);
-      const um = raw?.usageMetadata || raw?.usage_metadata || resp?.usageMetadata || {};
-      const viaUsage = um?.candidatesTokenCount ?? um?.candidates_token_count;
-      if (Number.isFinite(Number(viaUsage))) return Number(viaUsage);
-    } catch { }
-    return null;
+  get endMarkerEscaped() {
+    return this.endMarker.replace(/^<|>$/g, '');
   },
-  saveKey() {
-    const k = this.apiKey.trim();
-    if (!k) { toast('Empty key not saved', 'warn'); return; }
+  get filteredSavedKeys() {
+    return getSavedKeysForProvider(this.savedKeys, this.provider);
+  },
+  get providerLabel() {
+    return getProviderLabel(this.provider);
+  },
+  get sourceModeLabel() {
+    return resolveSourceModeLabel(this.sourceMode);
+  },
+  get selectedModelMeta() {
+    return this.availableModels.find(model => model.id === this.model) || null;
+  },
+  get visibleModels() {
+    if (this.provider !== OPENROUTER_PROVIDER) return this.availableModels;
+    return filterModelsByQuery(this.availableModels, this.modelQuery);
+  },
+  get extractionStatsSummary() {
+    if (!this.fileBlob) return '';
+    if (this.sourceAnalysisStatus === 'analyzing') return 'Analyzing local text extraction…';
+    if (this.sourceAnalysisStatus === 'error') return `Words: unavailable • Est. tokens: unavailable`;
+    if (this.sourceAnalysisStatus !== 'ready' || !this.extractedSource) return '';
+    const parts = [
+      `Words: ${this.extractedSource.wordCount.toLocaleString()}`,
+      `Est. tokens: ${this.extractedSource.tokenEstimate.toLocaleString()}`,
+    ];
+    if (Number.isFinite(Number(this.extractedSource.pageCount))) parts.push(`Pages: ${Number(this.extractedSource.pageCount)}`);
+    if (Number.isFinite(Number(this.extractedSource.chapterCount))) parts.push(`Chapters: ${Number(this.extractedSource.chapterCount)}`);
+    return parts.join(' • ');
+  },
 
-    // Check if key already exists
-    const existing = this.savedKeys.find(s => s.key === k);
-    if (existing) {
-      toast('Key already saved as "' + existing.label + '"', 'info');
+  ensureInitialized() {
+    if (this.initialized) return;
+    const migrated = migrateLegacyStorage();
+    this.providerKeys = migrated.providerKeys;
+    this.savedKeys = migrated.savedKeys;
+    this.provider = loadProvider();
+    this.sourceMode = loadSourceMode();
+    this.apiKey = this.providerKeys[this.provider] || '';
+    this.isSettingsOpen = !this.apiKey;
+    this.initialized = true;
+    this.refreshAvailableModels({ silent: true });
+  },
+
+  extractCandidatesTokenCount(response) {
+    return getProvider(this.provider).extractCandidatesTokenCount(response);
+  },
+
+  saveKey() {
+    const key = this.apiKey.trim();
+    if (!key) {
+      toast('Empty key not saved', 'warn');
       return;
     }
-
-    const label = prompt('Enter a label for this key (e.g. "Personal", "Work"):', 'Default');
-    if (label === null) return; // cancelled
-
-    const newEntry = { label: label || 'Default', key: k, created: Date.now() };
-    this.savedKeys.push(newEntry);
-    this.persistKeys();
-
-    localStorage.setItem('distillboard.gemini_key', k);
+    const existing = this.savedKeys.find(entry => entry.key === key && entry.provider === this.provider);
+    if (existing) {
+      toast(`Key already saved as "${existing.label}"`, 'info');
+      return;
+    }
+    const label = prompt(`Enter a label for this ${this.providerLabel} key:`, 'Default');
+    if (label === null) return;
+    this.savedKeys.push({
+      label: label || 'Default',
+      key,
+      provider: this.provider,
+      created: Date.now(),
+    });
+    this.savedKeys = normalizeSavedKeys(this.savedKeys);
+    persistSavedKeys(this.savedKeys);
+    this.providerKeys[this.provider] = key;
+    setStoredApiKey(this.provider, key);
     toast('API key saved', 'good');
   },
-  deleteKey(index) {
+
+  deleteKey(entry) {
+    const index = this.savedKeys.indexOf(entry);
+    if (index === -1) return;
     this.savedKeys.splice(index, 1);
-    this.persistKeys();
+    persistSavedKeys(this.savedKeys);
     toast('Key deleted', 'info');
   },
+
   loadKey(entry) {
     this.apiKey = entry.key;
-    localStorage.setItem('distillboard.gemini_key', entry.key);
-    toast('Loaded key: ' + entry.label, 'info');
+    this.providerKeys[this.provider] = entry.key;
+    setStoredApiKey(this.provider, entry.key);
+    toast(`Loaded key: ${entry.label}`, 'info');
   },
-  persistKeys() {
-    localStorage.setItem('distillboard.saved_keys', JSON.stringify(this.savedKeys));
+
+  clearKey() {
+    clearStoredApiKey(this.provider);
+    this.providerKeys[this.provider] = '';
+    this.apiKey = '';
+    toast('API key cleared', 'good');
   },
-  clearKey() { localStorage.removeItem('distillboard.gemini_key'); this.apiKey = ''; toast('API key cleared', 'good'); },
 
   savePrompt() {
-    const p = this.prompt.trim();
-    if (!p) { toast('Empty prompt not saved', 'warn'); return; }
-
-    // Check if prompt already exists (by content)
-    const existing = this.savedPrompts.find(s => s.text === p);
-    if (existing) {
-      toast('Prompt already saved as "' + existing.label + '"', 'info');
+    const promptText = this.prompt.trim();
+    if (!promptText) {
+      toast('Empty prompt not saved', 'warn');
       return;
     }
-
+    const existing = this.savedPrompts.find(entry => entry.text === promptText);
+    if (existing) {
+      toast(`Prompt already saved as "${existing.label}"`, 'info');
+      return;
+    }
     const label = prompt('Enter a label for this prompt:', 'My Custom Prompt');
-    if (label === null) return; // cancelled
-
-    const newEntry = { label: label || 'Untitled', text: p, created: Date.now() };
-    this.savedPrompts.push(newEntry);
+    if (label === null) return;
+    this.savedPrompts.push({ label: label || 'Untitled', text: promptText, created: Date.now() });
     this.persistPrompts();
-
     toast('Prompt saved', 'good');
   },
+
   deletePrompt(index) {
     this.savedPrompts.splice(index, 1);
     this.persistPrompts();
     toast('Prompt deleted', 'info');
   },
+
   loadPrompt(entry) {
     this.prompt = entry.text;
-    this.persist(); // saves current prompt to localStorage
-    toast('Loaded prompt: ' + entry.label, 'info');
+    this.persist();
+    toast(`Loaded prompt: ${entry.label}`, 'info');
   },
+
   persistPrompts() {
-    localStorage.setItem('distillboard.saved_prompts', JSON.stringify(this.savedPrompts));
+    localStorage.setItem(STORAGE_KEYS.savedPrompts, JSON.stringify(this.savedPrompts));
   },
-  onFileChange(e) { const f = e.target.files?.[0]; this.fileBlob = f || null; this.fileInfo = f ? `${f.name} • ${(f.type || '').replace('application/', '')} • ${(f.size / 1048576).toFixed(2)} MB` : ''; },
-  toggleTrace() { const t = $('#trace'); t.classList.toggle('open'); t?.setAttribute?.('aria-hidden', t.classList.contains('open') ? 'false' : 'true'); },
-  openTrace() { const t = $('#trace'); t.classList.add('open'); t?.setAttribute?.('aria-hidden', 'false'); },
-  closeTrace() { const t = $('#trace'); t.classList.remove('open'); t?.setAttribute?.('aria-hidden', 'true'); },
-  downloadTrace() { const blob = new Blob([JSON.stringify(this.trace, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'trace.json'; a.click(); URL.revokeObjectURL(a.href); },
+
+  async onProviderChange(event) {
+    this.provider = event.target.value;
+    if (this.provider !== OPENROUTER_PROVIDER) this.modelQuery = '';
+    this.apiKey = this.providerKeys[this.provider] || '';
+    this.persist();
+    await this.refreshAvailableModels();
+  },
+
+  async onSourceModeChange(event) {
+    this.sourceMode = event.target.value;
+    this.persist();
+    await this.refreshAvailableModels({ silent: true });
+  },
+
+  async onFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    this.fileBlob = file;
+    this.fileInfo = file ? `${file.name} • ${(file.type || '').replace('application/', '')} • ${(file.size / 1048576).toFixed(2)} MB` : '';
+    this.extractedSource = null;
+    this.sourceAnalysisError = '';
+    this.sourceAnalysisStatus = file ? 'analyzing' : 'idle';
+    this.sourceAnalysisPromise = null;
+    this.nativeSource = null;
+    if (file) this.startSourceAnalysis(file);
+    await this.refreshAvailableModels({ silent: true });
+  },
+
+  startSourceAnalysis(file) {
+    const signature = getFileSignature(file);
+    this.sourceAnalysisStatus = 'analyzing';
+    this.sourceAnalysisError = '';
+    this.sourceAnalysisPromise = analyzeSourceFile(file, sourceAnalysisCache)
+      .then(result => {
+        if (getFileSignature(this.fileBlob) !== signature) return result;
+        this.extractedSource = result;
+        this.sourceAnalysisStatus = 'ready';
+        this.sourceAnalysisError = '';
+        if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
+          toast(result.warnings[0], 'warn', 5000);
+        }
+        this.refreshAvailableModels({ silent: true });
+        return result;
+      })
+      .catch(err => {
+        if (getFileSignature(this.fileBlob) !== signature) return null;
+        this.extractedSource = null;
+        this.sourceAnalysisStatus = 'error';
+        this.sourceAnalysisError = err?.message || 'Failed to analyze source';
+        this.refreshAvailableModels({ silent: true });
+        return null;
+      });
+  },
+
+  toggleTrace() {
+    const trace = $('#trace');
+    trace.classList.toggle('open');
+    trace?.setAttribute?.('aria-hidden', trace.classList.contains('open') ? 'false' : 'true');
+  },
+
+  openTrace() {
+    const trace = $('#trace');
+    trace.classList.add('open');
+    trace?.setAttribute?.('aria-hidden', 'false');
+  },
+
+  closeTrace() {
+    const trace = $('#trace');
+    trace.classList.remove('open');
+    trace?.setAttribute?.('aria-hidden', 'true');
+  },
+
+  downloadTrace() {
+    const blob = new Blob([JSON.stringify(this.trace, null, 2)], { type: 'application/json' });
+    const anchor = document.createElement('a');
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = 'trace.json';
+    anchor.click();
+    URL.revokeObjectURL(anchor.href);
+  },
+
   openExport() { $('#exportModal').showModal(); },
   openInfo() { $('#infoModal').showModal(); },
+
   onThemeChange() {
     const modes = ['auto', 'light', 'dark'];
     this.themeMode = modes[(modes.indexOf(this.themeMode) + 1) % modes.length];
     this.applyTheme();
     this.persist();
-    toast('Theme: ' + this.themeMode, 'info');
+    toast(`Theme: ${this.themeMode}`, 'info');
   },
-  async copyAll() { const text = this.combinedText(); try { await navigator.clipboard.writeText(text); toast('Copied combined text', 'good'); } catch { download('distillation.txt', text); } },
-  // Helper: detect artifact leak token in output
-  hasCtrlLeak(text) { return /<ctrl94>/i.test(String(text || '')); },
-  // Export helpers: filename + metadata
-  sanitizeFilename(name) { return String(name || '').replace(/[\\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim(); },
-  bookBaseName() {
-    const fallback = 'Distillation';
+
+  async copyAll() {
+    const text = this.combinedText();
     try {
-      if (this.fileBlob && this.fileBlob.name) { return this.fileBlob.name.replace(/\.[^.]+$/, ''); }
-    } catch { }
-    return fallback;
+      await navigator.clipboard.writeText(text);
+      toast('Copied combined text', 'good');
+    } catch {
+      download('distillation.txt', text);
+    }
   },
-  exportBase() { return this.sanitizeFilename(`${this.bookBaseName()} - book excerpt`); },
+
+  hasCtrlLeak(text) {
+    return /<ctrl94>/i.test(String(text || ''));
+  },
+
+  sanitizeFilename(name) {
+    return String(name || '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+  },
+
+  bookBaseName() {
+    if (this.fileBlob?.name) return this.fileBlob.name.replace(/\.[^.]+$/, '');
+    return 'Distillation';
+  },
+
+  exportBase() {
+    return this.sanitizeFilename(`${this.bookBaseName()} - book excerpt`);
+  },
+
   exportMeta() {
     const createdAt = new Date().toISOString();
     return {
       title: `${this.bookBaseName()} - book excerpt`,
       source: this.fileBlob?.name || '',
+      provider: this.providerLabel,
+      sourceMode: this.sourceModeLabel,
       model: this.model,
       temperature: this.useTemperature ? Number(this.temperature) : '(default)',
       sections: Number(this.sections) || 0,
-      createdAt
+      createdAt,
     };
   },
-  metadataFrontMatter() {
-    const m = this.exportMeta(); return `---\n` +
-      `title: ${m.title}\n` +
-      (m.source ? `source_file: ${m.source}\n` : '') +
-      `model: ${m.model}\n` +
-      `temperature: ${m.temperature}\n` +
-      `sections: ${m.sections}\n` +
-      `date: ${m.createdAt}\n` +
-      `generator: book-distiller-petite-vue\n` +
-      `---\n\n`;
-  },
-  metadataTextHeader() { const m = this.exportMeta(); const lines = []; lines.push(`${m.title}`); if (m.source) lines.push(`Source: ${m.source}`); lines.push(`Model: ${m.model}`); lines.push(`Temperature: ${m.temperature}`); lines.push(`Sections: ${m.sections}`); lines.push(`Date: ${m.createdAt}`); lines.push(''); return lines.join('\n'); },
-  exportMd() { const name = `${this.exportBase()}.md`; const body = this.combinedText(); download(name, this.metadataFrontMatter() + body, 'text/markdown;charset=utf-8'); },
-  exportTxt() { const name = `${this.exportBase()}.txt`; const body = this.combinedText(); download(name, this.metadataTextHeader() + body); },
-  exportPdf() { const include = $('#includeTrace').checked ? this.trace : null; const name = `${this.exportBase()}.pdf`; makePdf(name, this.combinedText(), include, this.exportMeta()); },
 
-  combinedText() { return this.history.filter(h => h.role === 'model').map(h => h.parts.map(p => p.text || '').join('')).join('\n\n').trim(); },
-  renderMd(md) { try { return window.marked.parse(md || ''); } catch { return md || ''; } },
-  stringify(obj) { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } },
+  metadataFrontMatter() {
+    const meta = this.exportMeta();
+    return `---\n`
+      + `title: ${meta.title}\n`
+      + (meta.source ? `source_file: ${meta.source}\n` : '')
+      + `provider: ${meta.provider}\n`
+      + `source_mode: ${meta.sourceMode}\n`
+      + `model: ${meta.model}\n`
+      + `temperature: ${meta.temperature}\n`
+      + `sections: ${meta.sections}\n`
+      + `date: ${meta.createdAt}\n`
+      + `generator: book-distiller-petite-vue\n`
+      + `---\n\n`;
+  },
+
+  metadataTextHeader() {
+    const meta = this.exportMeta();
+    return [
+      meta.title,
+      meta.source ? `Source: ${meta.source}` : '',
+      `Provider: ${meta.provider}`,
+      `Source mode: ${meta.sourceMode}`,
+      `Model: ${meta.model}`,
+      `Temperature: ${meta.temperature}`,
+      `Sections: ${meta.sections}`,
+      `Date: ${meta.createdAt}`,
+      '',
+    ].filter(Boolean).join('\n');
+  },
+
+  exportMd() {
+    download(`${this.exportBase()}.md`, this.metadataFrontMatter() + this.combinedText(), 'text/markdown;charset=utf-8');
+  },
+
+  exportTxt() {
+    download(`${this.exportBase()}.txt`, this.metadataTextHeader() + this.combinedText());
+  },
+
+  exportPdf() {
+    const includeTrace = $('#includeTrace').checked ? this.trace : null;
+    makePdf(`${this.exportBase()}.pdf`, this.combinedText(), includeTrace, this.exportMeta());
+  },
+
+  combinedText() {
+    return combinedSectionsText(this.sectionsMeta);
+  },
+
+  renderMd(md) {
+    try {
+      return window.marked.parse(md || '');
+    } catch {
+      return md || '';
+    }
+  },
+
+  stringify(obj) {
+    try {
+      return JSON.stringify(obj, null, 2);
+    } catch {
+      return String(obj);
+    }
+  },
+
   getTitleFromMd(md) {
     const lines = (md || '').split(/\r?\n/);
     for (const line of lines) {
-      const m = line.match(/^\s{0,3}#{1,6}\s+(.+)/); if (m) return m[1].trim();
+      const match = line.match(/^\s{0,3}#{1,6}\s+(.+)/);
+      if (match) return match[1].trim();
       if (line.trim()) return line.trim().slice(0, 96);
     }
     return `Section ${this.sections + 1}`;
   },
-  // appendDoc is now a no-op; rendering handled by template via v-for
-  appendDoc(md, sid) { },
-  // rebuildDoc now only recalculates counters; DOM handled by template
+
+  appendDoc() { },
+
   rebuildDoc() {
-    if (this.sectionsMeta.length === 0) { this.sections = 0; this.tokenTally = 0; return; }
-    this.sections = 0; this.tokenTally = 0;
-    for (const [i, meta] of this.sectionsMeta.entries()) {
-      this.sections = i + 1;
+    if (this.sectionsMeta.length === 0) {
+      this.sections = 0;
+      this.tokenTally = 0;
+      return;
+    }
+    this.sections = 0;
+    this.tokenTally = 0;
+    for (const [index, meta] of this.sectionsMeta.entries()) {
+      this.sections = index + 1;
       this.tokenTally += estimateTokens(meta.text || '');
     }
   },
-  deleteSection(id) { const idx = this.sectionsMeta.findIndex(s => s.id === id); if (idx === -1) { toast('Section not found', 'warn'); return; } const meta = this.sectionsMeta[idx]; try { const mi = this.history.indexOf(meta.modelMsg); if (mi >= 0) this.history.splice(mi, 1); if (meta.userMsgBefore && Array.isArray(meta.userMsgBefore.parts)) { const isNextOnly = meta.userMsgBefore.parts.length === 1 && (meta.userMsgBefore.parts[0]?.text || '') === 'Next'; if (isNextOnly) { const ui = this.history.indexOf(meta.userMsgBefore); if (ui >= 0) this.history.splice(ui, 1); } } } catch { } this.sectionsMeta.splice(idx, 1); this.rebuildDoc(); toast('Section deleted', 'good'); },
-  // resetDoc no longer manipulates DOM; placeholder handled in template
+
+  deleteSection(id) {
+    const index = this.sectionsMeta.findIndex(section => section.id === id);
+    if (index === -1) {
+      toast('Section not found', 'warn');
+      return;
+    }
+    const meta = this.sectionsMeta[index];
+    try {
+      const modelIndex = this.history.indexOf(meta.modelMsg);
+      if (modelIndex >= 0) this.history.splice(modelIndex, 1);
+      if (isNextOnlyUserMessage(meta.userMsgBefore)) {
+        const userIndex = this.history.indexOf(meta.userMsgBefore);
+        if (userIndex >= 0) this.history.splice(userIndex, 1);
+      }
+    } catch { }
+    this.sectionsMeta.splice(index, 1);
+    this.rebuildDoc();
+    toast('Section deleted', 'good');
+  },
+
   resetDoc() { },
 
-  async start() {
-    if (!this.apiKey.trim()) { toast('Add your Gemini API key first', 'bad'); return; }
-    if (!this.fileBlob) { toast('Upload a PDF/EPUB first', 'bad'); return; }
-    if (!this.prompt.trim()) { toast('Prompt is empty', 'bad'); return; }
+  async refreshAvailableModels({ silent = false } = {}) {
+    if (!this.initialized) return;
+    const provider = getProvider(this.provider);
+    const nonce = ++this.modelRefreshNonce;
+    this.modelLoading = true;
+    this.modelLoadError = '';
+    try {
+      const models = await provider.listModels({
+        apiKey: this.apiKey.trim(),
+        sourceMode: this.sourceMode,
+        fileBlob: this.fileBlob,
+        extracted: this.extractedSource,
+      });
+      if (nonce !== this.modelRefreshNonce) return;
+      this.availableModels = models;
+      const fallback = this.provider === GOOGLE_PROVIDER ? getDefaultGoogleModel() : '';
+      this.model = chooseModel(this.model, models, fallback);
+    } catch (err) {
+      if (nonce !== this.modelRefreshNonce) return;
+      this.availableModels = this.provider === GOOGLE_PROVIDER ? GOOGLE_MODELS : [];
+      const fallback = this.provider === GOOGLE_PROVIDER ? getDefaultGoogleModel() : '';
+      this.model = chooseModel(this.model, this.availableModels, fallback);
+      this.modelLoadError = err?.message || 'Failed to load models';
+      if (!silent && this.provider === OPENROUTER_PROVIDER) {
+        toast(this.modelLoadError, 'warn', 6000);
+      }
+    } finally {
+      if (nonce === this.modelRefreshNonce) this.modelLoading = false;
+    }
+  },
 
-    // reset
-    this.resetDoc(); this.history = []; this.sections = 0; this.tokenTally = 0; this.lastAssistant = ''; this.trace = []; this.paused = false; this.running = false; this.sectionsMeta = []; this.nextSectionId = 1; this.anomalyRetryCount = 0;
-    this.retrying = false; this.retryAttempt = 0; this.retryMax = 0; this.retryRemainingMs = 0; this.retryPlannedMs = 0; this.lastErrorMessage = '';
-    this.autoWaiting = false; this.autoWaitRemainingMs = 0; this.autoWaitPlannedMs = 0; this.lastRequestStartedAt = 0;
-    this.status = 'uploading';
-
-    // init Gemini service
-    this.gem = createGeminiService({
+  createProviderSession() {
+    return getProvider(this.provider).createSession({
       apiKey: this.apiKey.trim(),
-      shouldContinue: () => !this.paused && (this.running || true),
+      shouldContinue: () => !this.paused,
       onTransient: async ({ attempt, waitMs, err }) => {
-        // Determine status code if present
-        const rawCode = (err?.error?.code ?? err?.response?.status ?? err?.status ?? err?.statusCode ?? err?.code);
+        const rawCode = err?.error?.code ?? err?.response?.status ?? err?.status ?? err?.statusCode ?? err?.code;
         const code = Number(rawCode);
         const isRateOrServer = Number.isFinite(code) && (code === 429 || (code >= 500 && code < 600));
-
-        // Policy: for 429/5xx, use fixed 60s retry and cap at 4 attempts
-        const MAX_AUTO_RETRIES = 4;
+        const maxAutoRetries = 4;
         const plannedWait = isRateOrServer ? 60000 : waitMs;
 
         this.retrying = true;
         this.retryAttempt = attempt;
-        this.retryMax = isRateOrServer ? MAX_AUTO_RETRIES : '∞';
+        this.retryMax = isRateOrServer ? maxAutoRetries : '∞';
         this.lastErrorMessage = err?.error?.message || err?.message || 'Temporary error';
 
         const statusLabel = isRateOrServer
@@ -261,70 +608,157 @@ createApp({
           : 'transient error';
         this.status = `retrying (${statusLabel})`;
 
-        // If we already reached the cap, pause and surface Resume
-        if (isRateOrServer && (attempt + 1) >= MAX_AUTO_RETRIES) {
+        if (isRateOrServer && (attempt + 1) >= maxAutoRetries) {
           this.retrying = false;
           this.retryRemainingMs = 0;
           this.retryPlannedMs = 0;
           this.paused = true;
           this.status = 'paused (auto-retry limit reached)';
           toast('Auto-retry limit reached. Click Resume to continue.', 'warn', 7000);
-          return; // stop waiting; shouldContinue() becomes false and aborts the loop
+          return;
         }
 
         await this.backoffWait(plannedWait);
-      }
+      },
     });
+  },
 
-    // upload via Files API and poll ACTIVE (with retries and RetryInfo)
-    {
-      const [up, utries, uerr] = await this.gem.callWithRetriesFn(() => this.gem.ai.files.upload({ file: this.fileBlob, config: { displayName: this.fileBlob.name } }));
-      if (uerr) {
-        if (String(uerr?.message) === '__aborted__') return;
-        this.paused = true; this.status = 'paused (error)'; this.lastErrorMessage = uerr?.message || 'unknown';
-        toast('Upload failed: ' + (uerr?.message || 'unknown'), 'bad', 6000);
-        this.pushTrace({ request: { step: 'files.upload' }, error: this.serializeErr(uerr), retries: utries });
-        return;
-      }
-      this.uploadedFile = up;
-      let tries = 0;
-      while (this.uploadedFile.state === 'PROCESSING' && tries < 120) {
-        await sleep(2000);
-        const [got, gtries, gerr] = await this.gem.callWithRetriesFn(() => this.gem.ai.files.get({ name: this.uploadedFile.name }));
-        if (gerr) {
-          if (String(gerr?.message) === '__aborted__') return;
-          this.paused = true; this.status = 'paused (error)'; this.lastErrorMessage = gerr?.message || 'unknown';
-          toast('Polling failed: ' + (gerr?.message || 'unknown'), 'bad', 6000);
-          this.pushTrace({ request: { step: 'files.get' }, error: this.serializeErr(gerr), retries: gtries });
-          return;
-        }
-        this.uploadedFile = got; tries++;
-      }
-      if (this.uploadedFile.state === 'FAILED') {
-        const err = new Error('File processing failed on Gemini.');
-        this.paused = true; this.status = 'paused (error)'; this.lastErrorMessage = err.message;
-        this.pushTrace({ request: { step: 'files.process' }, error: this.serializeErr(err), retries: 0 });
-        toast(err.message, 'bad');
-        return;
-      }
+  clearRetryState() {
+    this.retrying = false;
+    this.retryAttempt = 0;
+    this.retryMax = 0;
+    this.retryRemainingMs = 0;
+    this.retryPlannedMs = 0;
+    if (this.running && !this.paused && /^retrying/.test(this.status)) this.status = 'running';
+  },
+
+  async ensureExtractedSourceReady() {
+    if (this.sourceAnalysisStatus === 'analyzing' && this.sourceAnalysisPromise) {
+      await this.sourceAnalysisPromise.catch(() => null);
+    }
+  },
+
+  createAssistantMessage(text) {
+    return this.provider === GOOGLE_PROVIDER
+      ? { role: 'model', parts: [{ text }] }
+      : { role: 'assistant', content: text };
+  },
+
+  async prepareNativeSource(provider, session) {
+    try {
+      return await provider.prepareNativeSource(session, this.fileBlob);
+    } catch (err) {
+      if (String(err?.message) === '__aborted__') return null;
+      this.paused = true;
+      this.status = 'paused (error)';
+      this.lastErrorMessage = err?.message || 'unknown';
+      const step = err?.__providerStep || 'source.prepare';
+      const retries = err?.__providerRetries || 0;
+      this.pushTrace({ request: { step }, error: this.serializeErr(err), retries });
+      toast(`${this.providerLabel} source preparation failed: ${err?.message || 'unknown'}`, 'bad', 6000);
+      return null;
+    }
+  },
+
+  async start() {
+    this.ensureInitialized();
+    if (!this.apiKey.trim()) {
+      toast(`Add your ${this.providerLabel} API key first`, 'bad');
+      return;
+    }
+    if (!this.fileBlob) {
+      toast('Upload a PDF/EPUB first', 'bad');
+      return;
+    }
+    if (!this.prompt.trim()) {
+      toast('Prompt is empty', 'bad');
+      return;
     }
 
-    this.running = true; this.status = 'running'; this.startTime = Date.now();
+    await this.ensureExtractedSourceReady();
+    const provider = getProvider(this.provider);
+    const validation = provider.validateRun({
+      sourceMode: this.sourceMode,
+      fileBlob: this.fileBlob,
+      extracted: this.extractedSource,
+      modelMeta: this.selectedModelMeta,
+    });
+    if (!validation.ok) {
+      toast(validation.message || 'Configuration is invalid', 'bad', 6000);
+      return;
+    }
 
-    // First turn (see docs/WORKFLOW.md: Turn Structure)
-    const filePart = createPartFromUri(this.uploadedFile.uri, this.uploadedFile.mimeType);
-    const userFirst = createUserContent([filePart, 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.']);
-    const req1 = { model: this.model, contents: [userFirst], tools: [], config: this.makeConfig() };
-    let firstResp = null, firstTries = 0, firstText = '';
+    this.resetDoc();
+    this.history = [];
+    this.sections = 0;
+    this.tokenTally = 0;
+    this.lastAssistant = '';
+    this.trace = [];
+    this.paused = false;
+    this.running = false;
+    this.sectionsMeta = [];
+    this.nextSectionId = 1;
+    this.retrying = false;
+    this.retryAttempt = 0;
+    this.retryMax = 0;
+    this.retryRemainingMs = 0;
+    this.retryPlannedMs = 0;
+    this.lastErrorMessage = '';
+    this.autoWaiting = false;
+    this.autoWaitRemainingMs = 0;
+    this.autoWaitPlannedMs = 0;
+    this.lastRequestStartedAt = 0;
+    this.providerSession = this.createProviderSession();
+    this.nativeSource = null;
+    this.status = this.sourceMode === SOURCE_MODE_NATIVE ? 'preparing source' : 'running';
+
+    if (this.sourceMode === SOURCE_MODE_NATIVE) {
+      this.nativeSource = await this.prepareNativeSource(provider, this.providerSession);
+      if (!this.nativeSource) return;
+    }
+
+    this.running = true;
+    this.status = 'running';
+    this.startTime = Date.now();
+
+    const requestUserFirst = provider.buildFirstUserMessage({
+      sourceMode: this.sourceMode,
+      nativeSource: this.nativeSource,
+      extracted: this.extractedSource,
+      instructionText: BEGIN_INSTRUCTION,
+    });
+    const historyUserFirst = provider.buildPersistentHistoryFirstUserMessage({
+      sourceMode: this.sourceMode,
+      nativeSource: this.nativeSource,
+      extracted: this.extractedSource,
+      instructionText: BEGIN_INSTRUCTION,
+    });
+    const firstRequest = provider.buildRequest({
+      model: this.model,
+      history: [],
+      userMessage: requestUserFirst,
+      prompt: this.prompt,
+      useTemperature: this.useTemperature,
+      temperature: this.temperature,
+    });
+
+    let firstResponse = null;
+    let firstRetries = 0;
+    let firstText = '';
+
     await this.maybeAutoWaitBeforeRequest();
     this.lastRequestStartedAt = Date.now();
     for (let contentAttempts = 0; ;) {
-      const [resp1, r1tries, r1err] = await this.gem.callWithRetries(req1);
-      if (r1err) { if (String(r1err?.message) === '__aborted__') return; this.finishWithError(r1err, req1, r1tries); return; }
-      const text1 = resp1?.text || this.gem.extractText(resp1);
-      const nonCode = (text1 || '').trim().replace(/```[\s\S]*?```/g, '');
+      const [response, retries, err] = await provider.generate(this.providerSession, firstRequest);
+      if (err) {
+        if (String(err?.message) === '__aborted__') return;
+        this.finishWithError(err, firstRequest, retries);
+        return;
+      }
+      const text = provider.extractText(response);
+      const nonCode = (text || '').trim().replace(/```[\s\S]*?```/g, '');
       const tooShort = nonCode.length < 200;
-      const leak = this.hasCtrlLeak(text1);
+      const leak = this.hasCtrlLeak(text);
       if (leak || (tooShort && this.pauseOnAnomaly)) {
         if (contentAttempts < 5) {
           const reason = leak ? 'artifact leak (<ctrl94>)' : 'Short/empty response';
@@ -332,60 +766,98 @@ createApp({
           this.retryAttempt = contentAttempts;
           this.retryMax = 5;
           this.lastErrorMessage = reason;
-          await this.backoffWait(60000); this.retrying = false; continue;
-        } else {
-          this.paused = true; this.status = leak ? 'paused (artifact leak)' : 'paused (empty/short)';
-          toast(leak ? 'Paused: artifact leak detected' : 'Paused: response too short', 'warn');
-          return;
+          await this.backoffWait(60000);
+          this.retrying = false;
+          continue;
         }
+        this.paused = true;
+        this.status = leak ? 'paused (artifact leak)' : 'paused (empty/short)';
+        toast(leak ? 'Paused: artifact leak detected' : 'Paused: response too short', 'warn');
+        return;
       }
-      firstResp = resp1; firstTries = r1tries; firstText = text1; break;
+      firstResponse = response;
+      firstRetries = retries;
+      firstText = text;
+      break;
     }
-    const modelMsg1 = { role: 'model', parts: [{ text: firstText }] };
-    this.history.push(userFirst); this.history.push(modelMsg1);
-    const sid1 = this.nextSectionId++;
-    this.sectionsMeta.push({ id: sid1, text: firstText, modelMsg: modelMsg1, userMsgBefore: userFirst, candidatesTokenCount: this.extractCandidatesTokenCount(firstResp) });
-    this.sections += 1; this.tokenTally += estimateTokens(firstText); this.appendDoc(firstText, sid1);
-    this.pushTrace({ request: this.sanitize(req1), response: firstResp, retries: firstTries });
-    this.lastRequestFinishedAt = Date.now();
-    const done = await this.postTurnChecks(firstText); if (done) { this.cleanFinish(); return; }
+    this.clearRetryState();
+
+    const modelMsg = this.createAssistantMessage(firstText);
+    this.history.push(historyUserFirst);
+    this.history.push(modelMsg);
+    const sectionId = this.nextSectionId++;
+    this.sectionsMeta.push({
+      id: sectionId,
+      text: firstText,
+      modelMsg,
+      userMsgBefore: historyUserFirst,
+      candidatesTokenCount: this.extractCandidatesTokenCount(firstResponse),
+    });
+    this.sections += 1;
+    this.tokenTally += estimateTokens(firstText);
+    this.appendDoc(firstText, sectionId);
+    this.pushTrace({ request: this.sanitize(firstRequest), response: firstResponse, retries: firstRetries });
+    const complete = await this.postTurnChecks(firstText);
+    if (complete) {
+      this.cleanFinish();
+      return;
+    }
     this.nextLoop();
   },
 
   async nextLoop() {
+    const provider = getProvider(this.provider);
     while (this.running && !this.paused) {
-      // budgets
-      if (+this.budgetTime > 0 && (Date.now() - this.startTime) / 1000 > +this.budgetTime) { this.status = 'time budget reached'; toast('Time budget reached', 'warn'); break; }
-      if (+this.budgetTokens > 0 && this.tokenTally >= +this.budgetTokens) { this.status = 'token budget reached (est)'; toast('Token budget (estimated) reached', 'warn'); break; }
+      if (+this.budgetTime > 0 && (Date.now() - this.startTime) / 1000 > +this.budgetTime) {
+        this.status = 'time budget reached';
+        toast('Time budget reached', 'warn');
+        break;
+      }
+      if (+this.budgetTokens > 0 && this.tokenTally >= +this.budgetTokens) {
+        this.status = 'token budget reached (est)';
+        toast('Token budget (estimated) reached', 'warn');
+        break;
+      }
 
-      // After the first turn, only send "Next"; do not reattach the file.
-      // See docs/WORKFLOW.md → Turn Structure
-      const nextUser = createUserContent(['Next']);
-      const req = { model: this.model, contents: [...this.history, nextUser], tools: [], config: this.makeConfig() };
-      let resp = null, tries = 0;
+      const nextUser = provider.buildNextUserMessage();
+      const request = provider.buildRequest({
+        model: this.model,
+        history: this.history,
+        userMessage: nextUser,
+        prompt: this.prompt,
+        useTemperature: this.useTemperature,
+        temperature: this.temperature,
+      });
+
+      let response = null;
+      let retries = 0;
+      let text = '';
+
       await this.maybeAutoWaitBeforeRequest();
       this.lastRequestStartedAt = Date.now();
+
       for (let contentAttempts = 0; ;) {
-        const out = await this.gem.callWithRetries(req).catch(e => [null, 0, e]);
-        const r = Array.isArray(out) ? out : [null, 0, new Error('unknown')];
-        const [rresp, rtries, rerr] = r;
-        if (rerr) {
-          if (String(rerr?.message) === '__aborted__') return;
-          if (rerr?.error?.status === 'FAILED_PRECONDITION' || /Unsupported file uri/i.test(String(rerr?.message || ''))) {
-            // Invalid File Reference Recovery
-            toast('File reference invalid; re-uploading and updating history…', 'warn');
+        const [currentResponse, currentRetries, err] = await provider.generate(this.providerSession, request);
+        if (err) {
+          if (String(err?.message) === '__aborted__') return;
+          if (this.sourceMode === SOURCE_MODE_NATIVE && provider.canRecoverNativeSource(err)) {
+            toast('Source reference expired; refreshing source and retrying…', 'warn');
             try {
-              this.uploadedFile = await this.gem.ai.files.upload({ file: this.fileBlob, config: { displayName: this.fileBlob.name } });
-              try { for (const msg of this.history) { if (!msg || msg.role !== 'user' || !Array.isArray(msg.parts)) continue; for (const p of msg.parts) { if (p && p.fileData) { p.fileData.fileUri = this.uploadedFile.uri; if (this.uploadedFile.mimeType) p.fileData.mimeType = this.uploadedFile.mimeType; } else if (p && p.file_data) { p.file_data.file_uri = this.uploadedFile.uri; if (this.uploadedFile.mimeType) p.file_data.mime_type = this.uploadedFile.mimeType; } } } } catch { }
-            } catch (e) { this.finishWithError(rerr, req, rtries); return; }
+              this.nativeSource = await provider.recoverNativeSource(this.providerSession, this.fileBlob);
+              provider.rewriteHistoryNativeSource(this.history, this.nativeSource);
+            } catch (recoveryErr) {
+              this.finishWithError(recoveryErr, request, currentRetries);
+              return;
+            }
             continue;
           }
-          this.finishWithError(rerr, req, rtries); return;
+          this.finishWithError(err, request, currentRetries);
+          return;
         }
-        const txt = rresp?.text || this.gem.extractText(rresp);
-        const nonCode = (txt || '').trim().replace(/```[\s\S]*?```/g, '');
+        const currentText = provider.extractText(currentResponse);
+        const nonCode = (currentText || '').trim().replace(/```[\s\S]*?```/g, '');
         const tooShort = nonCode.length < 200;
-        const leak = this.hasCtrlLeak(txt);
+        const leak = this.hasCtrlLeak(currentText);
         if (leak || (tooShort && this.pauseOnAnomaly)) {
           if (contentAttempts < 5) {
             const reason = leak ? 'artifact leak (<ctrl94>)' : 'Short/empty response';
@@ -393,44 +865,107 @@ createApp({
             this.retryAttempt = contentAttempts;
             this.retryMax = 5;
             this.lastErrorMessage = reason;
-            await this.backoffWait(60000); this.retrying = false; continue;
-          } else {
-            this.paused = true; this.status = leak ? 'paused (artifact leak)' : 'paused (empty/short)';
-            toast(leak ? 'Paused: artifact leak detected' : 'Paused: response too short', 'warn');
-            return;
+            await this.backoffWait(60000);
+            this.retrying = false;
+            continue;
           }
+          this.paused = true;
+          this.status = leak ? 'paused (artifact leak)' : 'paused (empty/short)';
+          toast(leak ? 'Paused: artifact leak detected' : 'Paused: response too short', 'warn');
+          return;
         }
-        resp = rresp; tries = rtries; var text = txt; break;
+        response = currentResponse;
+        retries = currentRetries;
+        text = currentText;
+        break;
       }
-      const modelMsg = { role: 'model', parts: [{ text }] };
-      this.history.push(nextUser); this.history.push(modelMsg);
-      const sid = this.nextSectionId++;
-      this.sectionsMeta.push({ id: sid, text, modelMsg, userMsgBefore: nextUser, candidatesTokenCount: this.extractCandidatesTokenCount(resp) });
-      this.sections += 1; this.tokenTally += estimateTokens(text); this.appendDoc(text, sid);
-      this.pushTrace({ request: this.sanitize(req), response: resp, retries: tries });
-      this.lastRequestFinishedAt = Date.now();
-      const done = await this.postTurnChecks(text); if (done) break;
+      this.clearRetryState();
+
+      const modelMsg = this.createAssistantMessage(text);
+      this.history.push(nextUser);
+      this.history.push(modelMsg);
+      const sectionId = this.nextSectionId++;
+      this.sectionsMeta.push({
+        id: sectionId,
+        text,
+        modelMsg,
+        userMsgBefore: nextUser,
+        candidatesTokenCount: this.extractCandidatesTokenCount(response),
+      });
+      this.sections += 1;
+      this.tokenTally += estimateTokens(text);
+      this.appendDoc(text, sectionId);
+      this.pushTrace({ request: this.sanitize(request), response, retries });
+      const complete = await this.postTurnChecks(text);
+      if (complete) break;
     }
     this.cleanFinish();
   },
 
-  togglePause() { this.paused = !this.paused; toast(this.paused ? 'Paused' : 'Resumed', 'info'); if (!this.paused && this.running) this.nextLoop(); },
-  stop() { this.running = false; this.retrying = false; this.autoWaiting = false; this.autoWaitRemainingMs = 0; this.autoWaitPlannedMs = 0; this.status = 'stopped'; toast('Stopped', 'warn'); },
+  togglePause() {
+    this.paused = !this.paused;
+    toast(this.paused ? 'Paused' : 'Resumed', 'info');
+    if (!this.paused && this.running) this.nextLoop();
+  },
+
+  stop() {
+    this.running = false;
+    this.retrying = false;
+    this.autoWaiting = false;
+    this.autoWaitRemainingMs = 0;
+    this.autoWaitPlannedMs = 0;
+    this.status = 'stopped';
+    toast('Stopped', 'warn');
+  },
+
   resumeOrStart() {
     if (this.running) {
       if (this.paused) this.togglePause();
-    } else {
-      this.start();
+      return;
     }
+    this.start();
   },
 
-  // helpers
-  sanitize(req) { return JSON.parse(JSON.stringify(req)); },
-  makeConfig() { const cfg = { systemInstruction: this.prompt }; if (this.useTemperature) { cfg.generationConfig = { temperature: Number(this.temperature) || 0 }; } return cfg; },
-  applyTheme() { const preferDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches; const isDark = this.themeMode === 'dark' || (this.themeMode === 'auto' && preferDark); document.body.classList.toggle('dark', isDark); },
-  persist() { try { localStorage.setItem('distillboard.prompt', this.prompt || ''); localStorage.setItem('distillboard.model', this.model || ''); localStorage.setItem('distillboard.useTemperature', String(!!this.useTemperature)); localStorage.setItem('distillboard.temperature', String(this.temperature ?? '')); localStorage.setItem('distillboard.themeMode', this.themeMode || 'auto'); localStorage.setItem('distillboard.autoWaitBetweenRequests', String(!!this.autoWaitBetweenRequests)); localStorage.removeItem('distillboard.dark'); } catch { } },
-  serializeErr(e) { if (!e) return { message: 'unknown' }; if (typeof e === 'string') return { message: e }; return { message: e.message || 'unknown', name: e.name || 'Error', raw: e?.response || e?.toString?.() }; },
-  pushTrace({ request, response, error, retries }) { const ts = new Date().toISOString(); this.trace.push({ ts, request, response, error, retries }); },
+  sanitize(request) {
+    return JSON.parse(JSON.stringify(request));
+  },
+
+  applyTheme() {
+    const preferDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = this.themeMode === 'dark' || (this.themeMode === 'auto' && preferDark);
+    document.body.classList.toggle('dark', isDark);
+  },
+
+  persist() {
+    try {
+      localStorage.setItem(STORAGE_KEYS.prompt, this.prompt || '');
+      localStorage.setItem(STORAGE_KEYS.model, this.model || '');
+      localStorage.setItem(STORAGE_KEYS.provider, this.provider || GOOGLE_PROVIDER);
+      localStorage.setItem(STORAGE_KEYS.sourceMode, this.sourceMode || SOURCE_MODE_NATIVE);
+      localStorage.setItem(STORAGE_KEYS.useTemperature, String(!!this.useTemperature));
+      localStorage.setItem(STORAGE_KEYS.temperature, String(this.temperature ?? ''));
+      localStorage.setItem(STORAGE_KEYS.themeMode, this.themeMode || 'auto');
+      localStorage.setItem(STORAGE_KEYS.autoWaitBetweenRequests, String(!!this.autoWaitBetweenRequests));
+      localStorage.removeItem('distillboard.dark');
+      this.providerKeys[this.provider] = this.apiKey || '';
+      setStoredApiKey(this.provider, this.apiKey || '');
+    } catch { }
+  },
+
+  serializeErr(err) {
+    if (!err) return { message: 'unknown' };
+    if (typeof err === 'string') return { message: err };
+    return {
+      message: err.message || 'unknown',
+      name: err.name || 'Error',
+      error: err.error || null,
+      raw: err.response || err.toString?.(),
+    };
+  },
+
+  pushTrace({ request, response, error, retries }) {
+    this.trace.push({ ts: new Date().toISOString(), request, response, error, retries });
+  },
 
   async maybeAutoWaitBeforeRequest() {
     if (!this.autoWaitBetweenRequests) return;
@@ -444,71 +979,96 @@ createApp({
 
   async autoSpacingWait(ms) {
     if (ms <= 0) return;
-    const prevStatus = this.status;
+    const previousStatus = this.status;
     if (this.running && !this.paused) this.status = 'waiting (auto-spacing)';
     this.autoWaiting = true;
     this.autoWaitPlannedMs = ms;
     this.autoWaitRemainingMs = ms;
     const step = 250;
-    let remain = ms;
-    while (remain > 0 && this.running && !this.paused) { await sleep(step); remain -= step; this.autoWaitRemainingMs = remain; }
-    this.autoWaitRemainingMs = Math.max(0, remain);
+    let remaining = ms;
+    while (remaining > 0 && this.running && !this.paused) {
+      await sleep(step);
+      remaining -= step;
+      this.autoWaitRemainingMs = remaining;
+    }
+    this.autoWaitRemainingMs = Math.max(0, remaining);
     this.autoWaitPlannedMs = 0;
     this.autoWaiting = false;
     if (this.running && !this.paused) {
-      if (prevStatus === 'running' || prevStatus === 'waiting (auto-spacing)') this.status = 'running';
-      else this.status = prevStatus;
+      this.status = (previousStatus === 'running' || previousStatus === 'waiting (auto-spacing)')
+        ? 'running'
+        : previousStatus;
     }
   },
 
-  // backoff UI helper (retry timings are driven by gemini service via onTransient)
   async backoffWait(ms) {
     this.retrying = true;
     if (!this.retryMax) this.retryMax = '∞';
     this.retryPlannedMs = ms;
     this.retryRemainingMs = ms;
     const step = 250;
-    let remain = ms;
-    while (remain > 0 && !this.paused && (this.running || this.retrying)) {
-      const delta = Math.min(step, remain);
+    let remaining = ms;
+    while (remaining > 0 && !this.paused && (this.running || this.retrying)) {
+      const delta = Math.min(step, remaining);
       await sleep(delta);
-      remain = Math.max(0, remain - delta);
-      this.retryRemainingMs = remain;
+      remaining = Math.max(0, remaining - delta);
+      this.retryRemainingMs = remaining;
     }
-    this.retryRemainingMs = Math.max(0, remain);
-    if (remain <= 0) { this.retryPlannedMs = 0; }
+    this.retryRemainingMs = Math.max(0, remaining);
+    if (remaining <= 0) this.retryPlannedMs = 0;
   },
 
   async postTurnChecks(text) {
-    const re = new RegExp(String(this.endMarker || '<end_of_book>') + '$');
-    if (re.test((text || '').trim())) { this.status = 'complete'; toast('Distillation complete', 'good'); return true; }
-    if (this.pauseOnAnomaly) {
-      if (/^\s*(i\s+(can\'t|cannot|won\'t)|as an ai|i\'m unable|i do not have access)/i.test(text || '')) { this.paused = true; this.status = 'paused (refusal)'; toast('Paused: likely refusal', 'warn'); return true; }
-      if (sim3(this.lastAssistant, text) > 0.9) { this.paused = true; this.status = 'paused (loop)'; toast('Paused: response repeating', 'warn'); return true; }
+    const marker = new RegExp(String(this.endMarker || '<end_of_book>') + '$');
+    if (marker.test((text || '').trim())) {
+      this.status = 'complete';
+      toast('Distillation complete', 'good');
+      return true;
     }
-    this.lastAssistant = text; return false;
+    if (this.pauseOnAnomaly) {
+      if (/^\s*(i\s+(can\'t|cannot|won\'t)|as an ai|i\'m unable|i do not have access)/i.test(text || '')) {
+        this.paused = true;
+        this.status = 'paused (refusal)';
+        toast('Paused: likely refusal', 'warn');
+        return true;
+      }
+      if (sim3(this.lastAssistant, text) > 0.9) {
+        this.paused = true;
+        this.status = 'paused (loop)';
+        toast('Paused: response repeating', 'warn');
+        return true;
+      }
+    }
+    this.lastAssistant = text;
+    return false;
   },
 
-  cleanFinish() { this.running = false; this.retrying = false; this.autoWaiting = false; if (this.status === 'running') this.status = 'stopped'; },
-  finishWithError(err, req, retries) {
-    // Pause instead of aborting on errors
+  cleanFinish() {
+    this.running = false;
     this.retrying = false;
-    this.autoWaiting = false; this.autoWaitRemainingMs = 0; this.autoWaitPlannedMs = 0;
+    this.autoWaiting = false;
+    if (this.status === 'running') this.status = 'stopped';
+  },
+
+  finishWithError(err, request, retries) {
+    this.retrying = false;
+    this.autoWaiting = false;
+    this.autoWaitRemainingMs = 0;
+    this.autoWaitPlannedMs = 0;
     this.paused = true;
     this.status = 'paused (error)';
     this.lastErrorMessage = err?.message || 'unknown';
-    this.pushTrace({ request: this.sanitize(req), error: this.serializeErr(err), retries });
-    toast('API Error: ' + (err?.message || 'unknown'), 'bad', 7000);
+    this.pushTrace({ request: this.sanitize(request), error: this.serializeErr(err), retries });
+    toast(`API Error: ${err?.message || 'unknown'}`, 'bad', 7000);
   },
 }).mount();
 
-// Update theme on system preference change when in Auto mode
 try {
   const media = window.matchMedia && matchMedia('(prefers-color-scheme: dark)');
   if (media && media.addEventListener) {
     media.addEventListener('change', () => {
       const scope = document.body.__v_scope__;
-      if (scope && scope.ctx && scope.ctx.themeMode === 'auto') scope.ctx.applyTheme();
+      if (scope?.ctx?.themeMode === 'auto') scope.ctx.applyTheme();
     });
   }
 } catch { }

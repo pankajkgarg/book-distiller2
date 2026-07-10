@@ -3,13 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "book-distill": "scripts/codex-book-summary.mjs"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "book:summary": "node scripts/codex-book-summary.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:real": "playwright test tests/e2e/openrouter.real.spec.js"
   },
   "devDependencies": {
-    "vite": "^5.4.0"
+    "@playwright/test": "^1.59.1",
+    "jsdom": "^29.1.1",
+    "vite": "^5.4.0",
+    "vitest": "^4.1.10"
   }
 }
-
