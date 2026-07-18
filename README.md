@@ -135,7 +135,7 @@ To discover OpenRouter model ids:
 node scripts/codex-book-summary.mjs --list-openrouter-models deepseek-v3.2
 ```
 
-OpenRouter and direct DeepSeek runs omit `max_tokens` by default so the upstream model/provider chooses the output length. Pass `--max-output-tokens` only when you intentionally want a per-turn cap.
+OpenRouter and direct DeepSeek runs omit `max_tokens` by default so the upstream model/provider chooses the output length. Pass `--max-output-tokens` only when you intentionally want a per-turn cap. For reasoning models, use `--reasoning-effort medium` (or another supported effort) to send OpenRouter's unified `reasoning.effort` parameter.
 
 Chat-completions provider calls retry transient failures by default:
 
@@ -148,7 +148,7 @@ node scripts/codex-book-summary.mjs \
   --retry-delay-ms 15000
 ```
 
-For OpenRouter Claude models (`anthropic/claude-*`), the browser app and headless script enable Anthropic prompt caching by default with the standard 5-minute TTL. The cache refreshes each time it is used, which is the cheapest option for continuous continuation loops. Use `--openrouter-cache-ttl 1h` only when a run is expected to pause longer than 5 minutes between turns, or disable with `--openrouter-cache-ttl none` only when intentionally testing uncached behavior.
+For OpenRouter Claude (`anthropic/claude-*`) and Gemini (`google/gemini-*`) models, the headless script enables explicit prompt caching by default. Claude uses top-level automatic cache advancement; Gemini places an explicit breakpoint on the stable initial prompt-and-book block. The default TTL is 5 minutes. Claude can use `--openrouter-cache-ttl 1h`; Gemini supports 5 minutes through OpenRouter. Grok (`x-ai/grok-*`) prompt caching is automatic and provider-managed, so no cache flag is required. Use the same `--openrouter-session-id` across warm-up and measured calls to pin them to one upstream endpoint. Returned `usage.prompt_tokens_details.cached_tokens` is the proof of a cache hit.
 
 If a run stops after writing one or more `part_###.md` files, resume it from the run directory:
 

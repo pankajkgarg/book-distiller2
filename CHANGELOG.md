@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 - test: add Playwright E2E coverage for local extraction, provider validation, model refresh, and a real OpenRouter smoke path.
 - feat: limit OpenRouter model picker to models added in the last 12 months and add inline model search filtering.
 - feat: make the headless script a first-class `book-distill` CLI: `bin` entry for `npm link`, optional `--prompt` with the browser app's built-in distillation prompt as fallback (shared via `core.js`).
+- feat: add `--reasoning-effort` to the headless CLI and enable explicit Gemini prompt caching while recognizing Grok's automatic provider cache.
+- feat: add `--openrouter-session-id` so cache warm-ups and measured calls stay pinned to the same upstream provider endpoint.
 - test: restore the Vitest unit-test pipeline (`npm test`) and add coverage for model recency/search filtering.
 - ci: add a GitHub Actions workflow running unit and mocked E2E tests on push/PR.
 

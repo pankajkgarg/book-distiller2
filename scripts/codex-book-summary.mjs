@@ -42,8 +42,11 @@ Options:
                               Env var for OpenRouter API key. Default: OPENROUTER_API_KEY
       --openrouter-base-url <url>
                               OpenRouter API base URL. Default: ${OPENROUTER_DEFAULT_BASE_URL}
+      --openrouter-session-id <id>
+                              Stable routing key (max 256 chars) used to keep prompt-cache calls on one provider endpoint.
       --openrouter-cache-ttl <ttl>
-                              Claude prompt cache TTL for OpenRouter: 1h, 5m, or none. Default: ${OPENROUTER_DEFAULT_CLAUDE_CACHE_TTL} for Claude models.
+                              Explicit prompt cache TTL for OpenRouter: 1h, 5m, or none.
+                              Default: 5m for Claude and Gemini; Grok caching is automatic.
       --deepseek-api-key-env <name>
                               Env var for DeepSeek API key. Default: DEEPSEEK_API_KEY
       --deepseek-base-url <url>
@@ -52,6 +55,7 @@ Options:
       --list-openrouter-models [query]
                               List OpenRouter models, optionally filtered by query, then exit.
       --temperature <n>       Optional chat-completions temperature.
+      --reasoning-effort <n>  Reasoning effort: max, xhigh, high, medium, low, minimal, or none.
       --max-output-tokens <n> Optional chat-completions max output tokens. Default: omit max_tokens.
       --no-max-output-tokens  Do not send max_tokens to chat-completions providers; also overrides resumed capped runs.
       --max-parts <n>         Max continuation chunks. Default: 20
@@ -92,6 +96,7 @@ function parseArgs(argv) {
     else if (arg === '--codex-bin') args.codexBin = argv[++i];
     else if (arg === '--openrouter-api-key-env') args.openRouterApiKeyEnv = argv[++i];
     else if (arg === '--openrouter-base-url') args.openRouterBaseUrl = argv[++i];
+    else if (arg === '--openrouter-session-id') args.openRouterSessionId = argv[++i];
     else if (arg === '--openrouter-cache-ttl') args.openRouterCacheTtl = argv[++i];
     else if (arg === '--deepseek-api-key-env') args.deepSeekApiKeyEnv = argv[++i];
     else if (arg === '--deepseek-base-url') args.deepSeekBaseUrl = argv[++i];
@@ -101,6 +106,7 @@ function parseArgs(argv) {
       args.listOpenRouterModels = next && !next.startsWith('-') ? argv[++i] : '';
     }
     else if (arg === '--temperature') args.temperature = argv[++i];
+    else if (arg === '--reasoning-effort') args.reasoningEffort = argv[++i];
     else if (arg === '--max-output-tokens') args.maxOutputTokens = argv[++i];
     else if (arg === '--no-max-output-tokens') args.noMaxOutputTokens = true;
     else if (arg === '--max-parts') args.maxParts = argv[++i];
@@ -178,6 +184,29 @@ function isOpenRouterClaudeModel(provider, model) {
   return provider === PROVIDER_OPENROUTER && /^anthropic\/claude-/i.test(String(model || ''));
 }
 
+function isOpenRouterGeminiModel(provider, model) {
+  return provider === PROVIDER_OPENROUTER && /^google\/gemini-/i.test(String(model || ''));
+}
+
+function isOpenRouterGrokModel(provider, model) {
+  return provider === PROVIDER_OPENROUTER && /^x-ai\/grok-/i.test(String(model || ''));
+}
+
+function isOpenRouterQwenModel(provider, model) {
+  return provider === PROVIDER_OPENROUTER && /^qwen\//i.test(String(model || ''));
+}
+
+// Gemini and Qwen honor an embedded cache_control breakpoint on the first message.
+// Alibaba Qwen *requires* it to cache at all (verified: no breakpoint -> 0 cached);
+// OpenAI/Grok/DeepSeek cache implicitly and need nothing here.
+function usesEmbeddedCacheBreakpoint(provider, model) {
+  return isOpenRouterGeminiModel(provider, model) || isOpenRouterQwenModel(provider, model);
+}
+
+function supportsExplicitOpenRouterCaching(provider, model) {
+  return isOpenRouterClaudeModel(provider, model) || usesEmbeddedCacheBreakpoint(provider, model);
+}
+
 function normalizeOpenRouterCacheTtl(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return OPENROUTER_DEFAULT_CLAUDE_CACHE_TTL;
@@ -188,12 +217,50 @@ function normalizeOpenRouterCacheTtl(value) {
 }
 
 function openRouterCacheControl({ provider, model, cacheTtl }) {
-  if (!isOpenRouterClaudeModel(provider, model)) return null;
+  if (!supportsExplicitOpenRouterCaching(provider, model)) return null;
   const ttl = normalizeOpenRouterCacheTtl(cacheTtl);
   if (ttl === 'none') return null;
   const control = { type: 'ephemeral' };
-  if (ttl === '1h') control.ttl = '1h';
+  if (ttl === '1h') {
+    if (isOpenRouterGeminiModel(provider, model)) {
+      throw new Error('Gemini explicit prompt caching supports the standard 5m TTL, not 1h');
+    }
+    control.ttl = '1h';
+  }
   return control;
+}
+
+function withOpenRouterPromptCaching(messages, { provider, model, cacheTtl }) {
+  const cacheControl = openRouterCacheControl({ provider, model, cacheTtl });
+  if (!cacheControl || !usesEmbeddedCacheBreakpoint(provider, model) || messages.length === 0) return messages;
+
+  const [first, ...rest] = messages;
+  if (typeof first?.content !== 'string') return messages;
+  const tailTarget = Math.max(0, first.content.length - 2048);
+  const paragraphSplit = first.content.lastIndexOf('\n\n', tailTarget);
+  const splitAt = paragraphSplit > 0 ? paragraphSplit + 2 : tailTarget;
+  const cachedPrefix = first.content.slice(0, splitAt);
+  const uncachedTail = first.content.slice(splitAt);
+  return [
+    {
+      ...first,
+      content: [
+        { type: 'text', text: cachedPrefix, cache_control: cacheControl },
+        { type: 'text', text: uncachedTail },
+      ],
+    },
+    ...rest,
+  ];
+}
+
+function normalizeReasoningEffort(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+  const supported = new Set(['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none']);
+  if (!supported.has(normalized)) {
+    throw new Error('--reasoning-effort must be max, xhigh, high, medium, low, minimal, or none');
+  }
+  return normalized;
 }
 
 function timestamp() {
@@ -308,10 +375,6 @@ function expandSummarizerPrompt(promptText, { targetLanguage }) {
     applyPromptPlaceholders(promptText, { targetLanguage }),
     promptSuffix(promptText, { targetLanguage }),
   ].filter(Boolean).join('\n\n').trim();
-}
-
-function buildContinuePrompt({ continuePrompt }) {
-  return continuePrompt;
 }
 
 function normalizeWhitespace(text) {
@@ -990,8 +1053,10 @@ async function callChatCompletionsWithRetries({
   model,
   messages,
   temperature,
+  reasoningEffort,
   maxOutputTokens,
   openRouterCacheTtl,
+  openRouterSessionId,
   responseFile,
   retries,
   retryDelayMs,
@@ -1006,8 +1071,10 @@ async function callChatCompletionsWithRetries({
         model,
         messages,
         temperature,
+        reasoningEffort,
         maxOutputTokens,
         openRouterCacheTtl,
+        openRouterSessionId,
         responseFile,
       });
       if (!extractOpenRouterText(response).trim()) {
@@ -1047,16 +1114,22 @@ async function listOpenRouterModelsForCli({ query, baseUrl }) {
   }
 }
 
-async function callOpenRouter({ provider, apiKey, baseUrl, model, messages, temperature, maxOutputTokens, responseFile, openRouterCacheTtl }) {
+async function callOpenRouter({ provider, apiKey, baseUrl, model, messages, temperature, reasoningEffort, maxOutputTokens, responseFile, openRouterCacheTtl, openRouterSessionId }) {
   const body = {
     model,
-    messages,
+    messages: withOpenRouterPromptCaching(messages, {
+      provider,
+      model,
+      cacheTtl: openRouterCacheTtl,
+    }),
     stream: false,
   };
   const cacheControl = openRouterCacheControl({ provider, model, cacheTtl: openRouterCacheTtl });
-  if (cacheControl) body.cache_control = cacheControl;
+  if (cacheControl && isOpenRouterClaudeModel(provider, model)) body.cache_control = cacheControl;
+  if (provider === PROVIDER_OPENROUTER && openRouterSessionId) body.session_id = openRouterSessionId;
   const parsedTemperature = Number(temperature);
   if (Number.isFinite(parsedTemperature)) body.temperature = parsedTemperature;
+  if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
   const parsedMaxTokens = Number.parseInt(maxOutputTokens || '', 10);
   if (Number.isFinite(parsedMaxTokens) && parsedMaxTokens > 0) {
     body.max_tokens = parsedMaxTokens;
@@ -1279,7 +1352,7 @@ function buildChatMessages({ provider, promptText, extractedMarkdown, targetLang
   for (const text of parts) {
     messages.push({ role: 'assistant', content: text });
     if (!text.includes('<end_of_book>')) {
-      messages.push({ role: 'user', content: buildContinuePrompt({ continuePrompt, targetLanguage }) });
+      messages.push({ role: 'user', content: continuePrompt });
     }
   }
   return messages;
@@ -1383,7 +1456,7 @@ async function runCodexLoop({
         '--json',
         '-o', outputFile,
         threadId,
-        buildContinuePrompt({ continuePrompt, targetLanguage }),
+        continuePrompt,
       ],
       input: null,
       stdoutFile: eventsPath,
@@ -1425,8 +1498,10 @@ async function runChatCompletionsLoop({
   extractedMarkdown,
   targetLanguage,
   temperature,
+  reasoningEffort,
   maxOutputTokens,
   openRouterCacheTtl,
+  openRouterSessionId,
   retries,
   retryDelayMs,
   resume,
@@ -1477,8 +1552,10 @@ async function runChatCompletionsLoop({
       model,
       messages,
       temperature,
+      reasoningEffort,
       maxOutputTokens,
       openRouterCacheTtl,
+      openRouterSessionId,
       responseFile: responsePath,
       retries,
       retryDelayMs,
@@ -1503,7 +1580,7 @@ async function runChatCompletionsLoop({
 
     if (text.includes('<end_of_book>')) break;
     messages.push({ role: 'assistant', content: text });
-    messages.push({ role: 'user', content: buildContinuePrompt({ continuePrompt, targetLanguage }) });
+    messages.push({ role: 'user', content: continuePrompt });
   }
 
   await writeFile(path.join(runDir, 'thread_id.txt'), `${conversationId}\n`);
@@ -1584,9 +1661,13 @@ async function main() {
   const workdir = path.resolve(cwd, args.workdir || path.join(os.tmpdir(), 'codex-headless-book-summary'));
   const retries = nonNegativeInteger(args.retries ?? resumeMetadata?.retries ?? String(DEFAULT_RETRIES), '--retries');
   const retryDelayMs = requiredPositiveInteger(args.retryDelayMs || resumeMetadata?.retryDelayMs || String(DEFAULT_RETRY_DELAY_MS), '--retry-delay-ms');
-  const openRouterCacheTtl = provider === PROVIDER_OPENROUTER && isOpenRouterClaudeModel(provider, model)
+  const openRouterCacheTtl = provider === PROVIDER_OPENROUTER && supportsExplicitOpenRouterCaching(provider, model)
     ? normalizeOpenRouterCacheTtl(args.openRouterCacheTtl || resumeMetadata?.openRouterCacheTtl || OPENROUTER_DEFAULT_CLAUDE_CACHE_TTL)
     : 'none';
+  const openRouterSessionId = provider === PROVIDER_OPENROUTER
+    ? String(args.openRouterSessionId ?? resumeMetadata?.openRouterSessionId ?? '').trim()
+    : '';
+  if (openRouterSessionId.length > 256) throw new Error('--openrouter-session-id must be at most 256 characters');
 
   const noMaxOutputTokens = Boolean(args.noMaxOutputTokens || resumeMetadata?.noMaxOutputTokens);
   const maxOutputTokens = noMaxOutputTokens
@@ -1597,6 +1678,7 @@ async function main() {
   }
   const temperature = args.temperature ?? resumeMetadata?.temperature;
   if (temperature != null && !Number.isFinite(Number(temperature))) throw new Error('--temperature must be a number');
+  const reasoningEffort = normalizeReasoningEffort(args.reasoningEffort ?? resumeMetadata?.reasoningEffort);
   const metadataExtractedOut = resumeMetadata?.extractedOut ? path.resolve(cwd, resumeMetadata.extractedOut) : '';
   const canUseExistingExtract = Boolean(resumeRun && metadataExtractedOut && await exists(metadataExtractedOut));
   const runPromptPath = resumeRun ? path.join(resumeRun, 'summarizer_prompt.md') : '';
@@ -1634,8 +1716,14 @@ async function main() {
   console.log(`Provider -> ${provider}`);
   console.log(`Model -> ${model}`);
   if (provider === PROVIDER_OPENROUTER) {
-    console.log(`OpenRouter Claude cache -> ${openRouterCacheTtl}`);
+    const cacheLabel = isOpenRouterGrokModel(provider, model)
+      ? 'automatic (provider-managed)'
+      : supportsExplicitOpenRouterCaching(provider, model)
+        ? `explicit ${openRouterCacheTtl}`
+        : 'provider/model default';
+    console.log(`OpenRouter prompt cache -> ${cacheLabel}`);
   }
+  if (reasoningEffort) console.log(`Reasoning effort -> ${reasoningEffort}`);
   const extractedMarkdown = resumeRun && metadataExtractedOut && await exists(metadataExtractedOut)
     ? await readFile(metadataExtractedOut, 'utf8')
     : await extractSourceToMarkdown(inputPath, cacheDir);
@@ -1688,9 +1776,11 @@ async function main() {
     openRouterBaseUrl: provider === PROVIDER_OPENROUTER ? openRouterBaseUrl : undefined,
     openRouterApiKeyEnv: provider === PROVIDER_OPENROUTER ? openRouterApiKeyEnv : undefined,
     openRouterCacheTtl: provider === PROVIDER_OPENROUTER ? openRouterCacheTtl : undefined,
+    openRouterSessionId: provider === PROVIDER_OPENROUTER && openRouterSessionId ? openRouterSessionId : undefined,
     deepSeekBaseUrl: provider === PROVIDER_DEEPSEEK ? deepSeekBaseUrl : undefined,
     deepSeekApiKeyEnv: provider === PROVIDER_DEEPSEEK ? deepSeekApiKeyEnv : undefined,
     temperature: temperature ?? undefined,
+    reasoningEffort: reasoningEffort ?? undefined,
     maxOutputTokens: maxOutputTokens ?? undefined,
     createdAt: resumeMetadata?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -1709,8 +1799,10 @@ async function main() {
         extractedMarkdown,
         targetLanguage,
         temperature,
+        reasoningEffort,
         maxOutputTokens,
         openRouterCacheTtl,
+        openRouterSessionId,
         retries,
         retryDelayMs,
         resume: Boolean(resumeRun),
