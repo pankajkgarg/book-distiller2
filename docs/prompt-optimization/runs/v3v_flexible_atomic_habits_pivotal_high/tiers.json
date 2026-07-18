@@ -1,0 +1,27 @@
+{
+  "default": {
+    "floor": 0.3,
+    "aim": 0.4,
+    "ceiling": 0.5
+  },
+  "tiers": {
+    "transitional": {
+      "floor": 0.2,
+      "aim": 0.27,
+      "ceiling": 0.35
+    },
+    "supporting": {
+      "floor": 0.3,
+      "aim": 0.4,
+      "ceiling": 0.5
+    },
+    "pivotal": {
+      "floor": 0.4,
+      "aim": 0.5,
+      "ceiling": 0.6
+    }
+  },
+  "chapters": {
+    "1": "pivotal"
+  }
+}

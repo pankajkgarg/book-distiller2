@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- docs: add an agentic nonfiction book-mapping prompt and auditable Kimi K3 prompt-feedback experiment with exact prompt, telemetry, and quote-check metrics; copyrighted generated prose remains local.
+- docs: track the user-selected final nonfiction distillation prompt in `detailed_prompt.md`.
+- docs: record the user-selected Kimi K3 champion, a zero-prose low-effort failure, and a held-out adaptive-envelope validation without estimating missing provider metrics.
+- test: let the prompt evaluator persist JSON evidence and validate both whole-book and independent chapter-batch completion markers.
 - docs: refine `detailed_prompt.md` into a density-aware long-form distillation contract with exact-excerpt, coverage, and continuation safeguards.
 - docs: add a reproducible prompt-iteration record under `docs/prompt-optimization/`.
 - test: add a dependency-free evaluator for compression, excerpt share, verbatim quote matching, and completion-boundary behavior.

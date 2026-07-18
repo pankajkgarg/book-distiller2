@@ -1,10 +1,17 @@
 # Notes
 
+## Anchor
+- current default/champion: A exact-envelope vivid/high = 46.5%; user explicitly loved its prose and pacing
+- shortlist: A is champion; identical A at low effort is rejected after zero-text token starvation
+- artifacts: `detailed_prompt.md` · `docs/prompt-optimization/kimi-k3-feedback.md` · `docs/prompt-optimization/experiments.jsonl`
+- next: get user feedback on held-out *Atomic Habits* output; then tighten the adaptive envelope/omission contract or finalize; do not run another Kimi generation first; do not target fiction
+- standing gates: Kimi alone writes distillation prose; Codex/Claude may map chapters and tiers; visible length in words, API usage in tokens; preserve every run's exact prompt/output/telemetry/evaluation
+
 ## Overview
 Static client-side book distillation app. Uploads PDF/EPUB, can extract text locally in the browser or use provider-native file handling, and distills content iteratively. No backend. Deployed on GitHub Pages.
 
 ## Current status
-[2026-07-10] Working. The density-aware prompt optimization and full three-section GPT-5.6 comparison are complete. On 21,164 raw source words, Sol/Codex produced 9,088 words (42.9%); Luna/Codex 6,740 (31.8%); Luna/OpenRouter 6,983 (33.0%). A strengthened full-paragraph-excerpt Luna/Codex rerun produced 7,162 words (33.8%) with 5/6 exact quote groups, but still omitted a Chapter 2 excerpt and required three turns, showing that prompt-only excerpt enforcement is unreliable. Results are in `docs/prompt-optimization/results.md`; artifacts are under `temp/prompt_optimization/`. The recommended next design is deterministic excerpt selection followed by Luna weaving and evaluator gating. Vitest is green (28 tests). `src/` remains alternate/non-primary.
+[2026-07-18] A remains the Kimi K3 editorial champion and `detailed_prompt.md` now contains its exact prompt. The held-out high-effort *Atomic Habits* Chapter 1 run used a pivotal 40–60% adaptive band but returned 3,296 of 4,388 words (75.1%), using 14,517 API output tokens in 481 seconds; it retained the important lessons but stayed too close to the source, ignored several mapped omissions, and cleared only 6/10 strict quote checks (8/10 content checks). No further Kimi generation should run before user feedback. Low effort remains rejected after its earlier 24,000-token zero-prose failure.
 
 ## Architecture
 - Decision: Keep deployment static and browser-first. Why: shipped app must run on GitHub Pages with no backend. See log [2026-04-20].

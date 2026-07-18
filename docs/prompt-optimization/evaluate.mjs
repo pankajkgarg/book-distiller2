@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 
-const [sourcePath, summaryPath] = process.argv.slice(2);
+const [sourcePath, summaryPath, outputPath] = process.argv.slice(2);
 if (!sourcePath || !summaryPath) {
-  console.error('Usage: node docs/prompt-optimization/evaluate.mjs <source.txt> <summary.md>');
+  console.error('Usage: node docs/prompt-optimization/evaluate.mjs <source.txt> <summary.md> [evaluation.json]');
   process.exit(1);
 }
 
@@ -44,10 +44,12 @@ const quoteChecks = quoteGroups.map((quote, index) => ({
     /^([“"])[\s\S]*([”"])$/.test(quote) ? quote.slice(1, -1) : quote,
   ),
 }));
-const endMarkers = summary.match(/<end_of_book>/g)?.length || 0;
+const matchedEndMarkers = summary.match(/<(?:end_of_book|end_of_batch)>/g) || [];
+const endMarkers = matchedEndMarkers.length;
+const finalEndMarker = matchedEndMarkers.at(-1) || null;
 const ratio = sourceWords ? summaryWords / sourceWords : 0;
 
-console.log(JSON.stringify({
+const evaluation = {
   source_words: sourceWords,
   summary_words: summaryWords,
   compression_percent: Number((ratio * 100).toFixed(1)),
@@ -62,6 +64,15 @@ console.log(JSON.stringify({
     item => item.content_match_ignoring_added_outer_quotes,
   ).length,
   end_markers: endMarkers,
-  boundary_pass: endMarkers === 1 && summary.trim().endsWith('<end_of_book>'),
+  final_end_marker: finalEndMarker,
+  boundary_pass: endMarkers === 1 && summary.trim().endsWith(finalEndMarker || '\0'),
   quote_checks: quoteChecks,
-}, null, 2));
+};
+
+const rendered = `${JSON.stringify(evaluation, null, 2)}\n`;
+if (outputPath) {
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(outputPath, rendered, 'utf8');
+} else {
+  process.stdout.write(rendered);
+}

@@ -1,0 +1,12 @@
+{
+  "label": "v3v_ch1",
+  "effort": "low",
+  "stop": "max_tokens",
+  "visible_output_words": 0,
+  "requested_max_tokens": 24000,
+  "failure": "thinking_starved_output",
+  "automatic_retry_target_tokens": 36000,
+  "retry_aborted_by_operator": true,
+  "provider_usage_record_available": false,
+  "reason": "The pre-safety runner retried before writing telemetry. Console evidence established stop=max_tokens and zero visible prose; the retry was interrupted immediately to protect quota. Null usage fields are not estimates."
+}

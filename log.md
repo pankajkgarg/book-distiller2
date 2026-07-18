@@ -169,3 +169,26 @@ scripts/codex-book-summary.mjs:~1700 hardcodes /Users/pankaj/work/content/vendin
 
 ## [2026-07-11 00:40] note | Kimi K3 access + caching + SxS vs Gemini
 KIMI_API_KEY (sk-kim...) is a Kimi Code SUBSCRIPTION key: Anthropic-compatible endpoint https://api.kimi.com/coding/v1/messages, header x-api-key, model id `k3` (NOT the moonshot.ai OpenAI PAYG API, which 401s this key). reasoning_effort only accepts "max"; here used Anthropic thinking budget 12k. Caching = automatic prefix caching (Anthropic usage shape): 2-call probe -> call2 cache_read_input_tokens=7424/7675, no cache_creation charge ($0.30 hit vs $3 miss /Mtok); small <~2k prefix does not cache. Ch3 SxS: Kimi 5,195 words / 7,724 out tok / 226s (~4x slower); Gemini 5,732 words / 6,870+1,930 / 60s / $0.123. Artifact https://claude.ai/code/artifact/05aeff3d-9b3f-4f53-8e13-324c9630adba
+
+## [2026-07-18 13:30] experiment | K3 exact-budget prompt audit
+Reconstructed the Kimi Code prompt trials: exact chapter envelopes produced readable but over-compressed 30-36% drafts and used 16,796-42,686 output tokens per call; a vivid pivotal-tier variant reached 46.5% with exact excerpts and better pacing. The next test removes all numeric length targets and uses agent-assigned semantic tiers.
+
+## [2026-07-18 14:12] experiment | K3 qualitative and mapped prompt trials
+On Sources of Power Ch1 (2,329 words), K3 low produced 1,715 words/73.6%/11,402 output tokens (qualitative), 2,039/87.5%/11,917 (survival test), and 1,996/85.7%/9,423 (mapped cuts). Exact-envelope vivid/high remained 1,082/46.5%/26,861; evidence is under temp/prompt_opt_k3 and docs/prompt-optimization/kimi-k3-feedback.md.
+
+## [2026-07-18 14:13] status | prior current status superseded
+The prior NOTES status recorded the completed GPT-5.6 comparison and deterministic excerpt-weaving recommendation; the active work is now the paused Kimi K3 prompt-feedback checkpoint.
+
+## [2026-07-18 14:20] decision | user selects K3 candidate A
+## [2026-07-18 15:02] experiment | identical A at low effort starved
+K3 low exhausted a 24,000-token generation envelope entirely in deliberation and returned zero visible prose. The automatic 36,000-token retry was interrupted; incomplete provider metrics remain null rather than estimated (`temp/prompt_opt_k3/v3v__vivid_low/failure.json`).
+
+## [2026-07-18 15:03] fix | K3 starvation retries made opt-in
+The audit runner now records zero-text `max_tokens` failures before returning, writes `failure.json`, and retries only with explicit `--retry-starved`. Tier overrides now affect the actual envelope, not just the run brief.
+User loved A: the vivid exact-envelope/high-effort Chapter 1 distillation at 1,082 words (46.5% of source), 4/4 exact quote groups, and 26,861 API output tokens. Treat A's prose and pacing as the editorial champion; optimize usage without changing its target style.
+
+## [2026-07-18 15:13] note | correction to 14:20 decision entry
+The orphaned “User loved A” line immediately above is the body of the 14:20 decision entry; later headers were accidentally inserted before it. This note supersedes the apparent association without rewriting append-only history.
+
+## [2026-07-18 15:14] experiment | adaptive envelope overshoots on Atomic Habits
+K3 high distilled held-out Chapter 1 to 3,296/4,388 words (75.1%) despite a pivotal 40–60% band; 14,517 API output tokens, 481s, 6/10 strict quotes and 8/10 content matches. Coverage was complete but mapped omissions were frequently ignored; pause for user feedback (`temp/prompt_opt_k3/v3v_flexible__atomic_habits_ch01__pivotal_high`).

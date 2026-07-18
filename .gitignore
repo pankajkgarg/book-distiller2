@@ -4,8 +4,6 @@ dist
 dist-ssr
 *.local
 
-detailed_prompt.md
-
 .svelte-kit
 
 yarn-error.log*

@@ -1,0 +1,17 @@
+{
+  "default": {
+    "floor": 0.2,
+    "aim": 0.24,
+    "ceiling": 0.3
+  },
+  "tiers": {
+    "exceptional": {
+      "floor": 0.3,
+      "aim": 0.36,
+      "ceiling": 0.45
+    }
+  },
+  "chapters": {
+    "1": "exceptional"
+  }
+}
