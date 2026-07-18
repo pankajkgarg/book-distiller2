@@ -1,5 +1,5 @@
 // Conversation workflow and error handling are documented in docs/WORKFLOW.md
-import { createApp } from 'https://unpkg.com/petite-vue?module';
+import { createApp } from 'https://unpkg.com/petite-vue@0.4.1?module';
 import { analyzeSourceFile } from './extractors.js';
 import {
   chooseModel,
@@ -36,21 +36,19 @@ import {
 import { getProvider, getProviderList } from './providers.js';
 
 const $ = selector => document.querySelector(selector);
-const el = (tag, cls, html) => {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (html !== undefined) node.innerHTML = html;
-  return node;
-};
 
 const STORAGE_KEYS = getStorageKeys();
 const AUTO_WAIT_MS = 60000;
+const ANOMALY_MAX_ATTEMPTS = 5;
+const ANOMALY_WAIT_MS = 60000;
 const BEGIN_INSTRUCTION = 'Begin as instructed: include Opening the Journey (intro, architecture, reading guide) and the first complete thematic section.';
 const sourceAnalysisCache = new Map();
 
 function toast(message, type = 'info', ms = 3500) {
   const host = $('#toasts');
-  const node = el('div', `toast ${type}`, message);
+  const node = document.createElement('div');
+  node.className = `toast ${type}`;
+  node.textContent = message;
   host.appendChild(node);
   setTimeout(() => node.remove(), ms);
 }
@@ -518,20 +516,9 @@ createApp({
     return `Section ${this.sections + 1}`;
   },
 
-  appendDoc() { },
-
   rebuildDoc() {
-    if (this.sectionsMeta.length === 0) {
-      this.sections = 0;
-      this.tokenTally = 0;
-      return;
-    }
-    this.sections = 0;
-    this.tokenTally = 0;
-    for (const [index, meta] of this.sectionsMeta.entries()) {
-      this.sections = index + 1;
-      this.tokenTally += estimateTokens(meta.text || '');
-    }
+    this.sections = this.sectionsMeta.length;
+    this.tokenTally = this.sectionsMeta.reduce((sum, meta) => sum + estimateTokens(meta.text || ''), 0);
   },
 
   deleteSection(id) {
@@ -553,8 +540,6 @@ createApp({
     this.rebuildDoc();
     toast('Section deleted', 'good');
   },
-
-  resetDoc() { },
 
   async refreshAvailableModels({ silent = false } = {}) {
     if (!this.initialized) return;
@@ -660,6 +645,74 @@ createApp({
     }
   },
 
+  // Runs one provider generation with anomaly detection (artifact leaks,
+  // short/empty output) and optional native-source recovery. Returns
+  // { response, retries, text } on success, or null when the run must stop —
+  // error/pause/abort state has already been applied in that case.
+  async runGenerationTurn(provider, request, { allowNativeRecovery = false } = {}) {
+    for (let contentAttempts = 0; ;) {
+      const [response, retries, err] = await provider.generate(this.providerSession, request);
+      if (err) {
+        if (String(err?.message) === '__aborted__') return null;
+        if (allowNativeRecovery && this.sourceMode === SOURCE_MODE_NATIVE && provider.canRecoverNativeSource(err)) {
+          toast('Source reference expired; refreshing source and retrying…', 'warn');
+          try {
+            this.nativeSource = await provider.recoverNativeSource(this.providerSession, this.fileBlob);
+            provider.rewriteHistoryNativeSource(this.history, this.nativeSource);
+          } catch (recoveryErr) {
+            this.finishWithError(recoveryErr, request, retries);
+            return null;
+          }
+          continue;
+        }
+        this.finishWithError(err, request, retries);
+        return null;
+      }
+      const text = provider.extractText(response);
+      const nonCode = (text || '').trim().replace(/```[\s\S]*?```/g, '');
+      // A bare end-marker response is a valid completion, not a short-output anomaly.
+      const isCompletion = (text || '').trim().endsWith(String(this.endMarker || '<end_of_book>'));
+      const tooShort = nonCode.length < 200 && !isCompletion;
+      const leak = this.hasCtrlLeak(text);
+      if (leak || (tooShort && this.pauseOnAnomaly)) {
+        if (contentAttempts < ANOMALY_MAX_ATTEMPTS) {
+          const reason = leak ? 'artifact leak (<ctrl94>)' : 'Short/empty response';
+          this.status = `retrying (${reason})`;
+          this.retryAttempt = contentAttempts;
+          this.retryMax = ANOMALY_MAX_ATTEMPTS;
+          this.lastErrorMessage = reason;
+          await this.backoffWait(ANOMALY_WAIT_MS);
+          this.retrying = false;
+          contentAttempts += 1;
+          continue;
+        }
+        this.paused = true;
+        this.status = leak ? 'paused (artifact leak)' : 'paused (empty/short)';
+        toast(leak ? 'Paused: artifact leak detected' : 'Paused: response too short', 'warn');
+        return null;
+      }
+      this.clearRetryState();
+      return { response, retries, text };
+    }
+  },
+
+  recordTurn({ userMsg, request, response, retries, text }) {
+    this.pushTrace({ request: this.sanitize(request), response, retries });
+    // A bare end-marker reply just closes the run; don't record it as a section.
+    if ((text || '').trim() === String(this.endMarker || '<end_of_book>')) return;
+    const modelMsg = this.createAssistantMessage(text);
+    this.history.push(userMsg, modelMsg);
+    this.sectionsMeta.push({
+      id: this.nextSectionId++,
+      text,
+      modelMsg,
+      userMsgBefore: userMsg,
+      candidatesTokenCount: this.extractCandidatesTokenCount(response),
+    });
+    this.sections += 1;
+    this.tokenTally += estimateTokens(text);
+  },
+
   async start() {
     this.ensureInitialized();
     if (!this.apiKey.trim()) {
@@ -688,7 +741,6 @@ createApp({
       return;
     }
 
-    this.resetDoc();
     this.history = [];
     this.sections = 0;
     this.tokenTally = 0;
@@ -742,62 +794,13 @@ createApp({
       temperature: this.temperature,
     });
 
-    let firstResponse = null;
-    let firstRetries = 0;
-    let firstText = '';
-
     await this.maybeAutoWaitBeforeRequest();
     this.lastRequestStartedAt = Date.now();
-    for (let contentAttempts = 0; ;) {
-      const [response, retries, err] = await provider.generate(this.providerSession, firstRequest);
-      if (err) {
-        if (String(err?.message) === '__aborted__') return;
-        this.finishWithError(err, firstRequest, retries);
-        return;
-      }
-      const text = provider.extractText(response);
-      const nonCode = (text || '').trim().replace(/```[\s\S]*?```/g, '');
-      const tooShort = nonCode.length < 200;
-      const leak = this.hasCtrlLeak(text);
-      if (leak || (tooShort && this.pauseOnAnomaly)) {
-        if (contentAttempts < 5) {
-          const reason = leak ? 'artifact leak (<ctrl94>)' : 'Short/empty response';
-          this.status = `retrying (${reason})`;
-          this.retryAttempt = contentAttempts;
-          this.retryMax = 5;
-          this.lastErrorMessage = reason;
-          await this.backoffWait(60000);
-          this.retrying = false;
-          continue;
-        }
-        this.paused = true;
-        this.status = leak ? 'paused (artifact leak)' : 'paused (empty/short)';
-        toast(leak ? 'Paused: artifact leak detected' : 'Paused: response too short', 'warn');
-        return;
-      }
-      firstResponse = response;
-      firstRetries = retries;
-      firstText = text;
-      break;
-    }
-    this.clearRetryState();
+    const firstTurn = await this.runGenerationTurn(provider, firstRequest);
+    if (!firstTurn) return;
 
-    const modelMsg = this.createAssistantMessage(firstText);
-    this.history.push(historyUserFirst);
-    this.history.push(modelMsg);
-    const sectionId = this.nextSectionId++;
-    this.sectionsMeta.push({
-      id: sectionId,
-      text: firstText,
-      modelMsg,
-      userMsgBefore: historyUserFirst,
-      candidatesTokenCount: this.extractCandidatesTokenCount(firstResponse),
-    });
-    this.sections += 1;
-    this.tokenTally += estimateTokens(firstText);
-    this.appendDoc(firstText, sectionId);
-    this.pushTrace({ request: this.sanitize(firstRequest), response: firstResponse, retries: firstRetries });
-    const complete = await this.postTurnChecks(firstText);
+    this.recordTurn({ userMsg: historyUserFirst, request: firstRequest, ...firstTurn });
+    const complete = await this.postTurnChecks(firstTurn.text);
     if (complete) {
       this.cleanFinish();
       return;
@@ -829,74 +832,14 @@ createApp({
         temperature: this.temperature,
       });
 
-      let response = null;
-      let retries = 0;
-      let text = '';
-
       await this.maybeAutoWaitBeforeRequest();
       this.lastRequestStartedAt = Date.now();
 
-      for (let contentAttempts = 0; ;) {
-        const [currentResponse, currentRetries, err] = await provider.generate(this.providerSession, request);
-        if (err) {
-          if (String(err?.message) === '__aborted__') return;
-          if (this.sourceMode === SOURCE_MODE_NATIVE && provider.canRecoverNativeSource(err)) {
-            toast('Source reference expired; refreshing source and retrying…', 'warn');
-            try {
-              this.nativeSource = await provider.recoverNativeSource(this.providerSession, this.fileBlob);
-              provider.rewriteHistoryNativeSource(this.history, this.nativeSource);
-            } catch (recoveryErr) {
-              this.finishWithError(recoveryErr, request, currentRetries);
-              return;
-            }
-            continue;
-          }
-          this.finishWithError(err, request, currentRetries);
-          return;
-        }
-        const currentText = provider.extractText(currentResponse);
-        const nonCode = (currentText || '').trim().replace(/```[\s\S]*?```/g, '');
-        const tooShort = nonCode.length < 200;
-        const leak = this.hasCtrlLeak(currentText);
-        if (leak || (tooShort && this.pauseOnAnomaly)) {
-          if (contentAttempts < 5) {
-            const reason = leak ? 'artifact leak (<ctrl94>)' : 'Short/empty response';
-            this.status = `retrying (${reason})`;
-            this.retryAttempt = contentAttempts;
-            this.retryMax = 5;
-            this.lastErrorMessage = reason;
-            await this.backoffWait(60000);
-            this.retrying = false;
-            continue;
-          }
-          this.paused = true;
-          this.status = leak ? 'paused (artifact leak)' : 'paused (empty/short)';
-          toast(leak ? 'Paused: artifact leak detected' : 'Paused: response too short', 'warn');
-          return;
-        }
-        response = currentResponse;
-        retries = currentRetries;
-        text = currentText;
-        break;
-      }
-      this.clearRetryState();
+      const turn = await this.runGenerationTurn(provider, request, { allowNativeRecovery: true });
+      if (!turn) return;
 
-      const modelMsg = this.createAssistantMessage(text);
-      this.history.push(nextUser);
-      this.history.push(modelMsg);
-      const sectionId = this.nextSectionId++;
-      this.sectionsMeta.push({
-        id: sectionId,
-        text,
-        modelMsg,
-        userMsgBefore: nextUser,
-        candidatesTokenCount: this.extractCandidatesTokenCount(response),
-      });
-      this.sections += 1;
-      this.tokenTally += estimateTokens(text);
-      this.appendDoc(text, sectionId);
-      this.pushTrace({ request: this.sanitize(request), response, retries });
-      const complete = await this.postTurnChecks(text);
+      this.recordTurn({ userMsg: nextUser, request, ...turn });
+      const complete = await this.postTurnChecks(turn.text);
       if (complete) break;
     }
     this.cleanFinish();
@@ -1019,8 +962,10 @@ createApp({
   },
 
   async postTurnChecks(text) {
-    const marker = new RegExp(String(this.endMarker || '<end_of_book>') + '$');
-    if (marker.test((text || '').trim())) {
+    // endsWith instead of RegExp: user-configurable markers may contain regex
+    // metacharacters.
+    const marker = String(this.endMarker || '<end_of_book>');
+    if ((text || '').trim().endsWith(marker)) {
       this.status = 'complete';
       toast('Distillation complete', 'good');
       return true;
@@ -1044,6 +989,9 @@ createApp({
   },
 
   cleanFinish() {
+    // Paused runs must stay resumable: keep `running` so Resume continues the
+    // loop instead of restarting the distillation from scratch.
+    if (this.paused) return;
     this.running = false;
     this.retrying = false;
     this.autoWaiting = false;

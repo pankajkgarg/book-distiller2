@@ -27,7 +27,17 @@ All notable changes to this project will be documented in this file.
 - test: restore the Vitest unit-test pipeline (`npm test`) and add coverage for model recency/search filtering.
 - ci: add a GitHub Actions workflow running unit and mocked E2E tests on push/PR.
 
+### Changed
+- refactor: extract the duplicated first-turn/continuation generation loop in `app.js` into shared `runGenerationTurn`/`recordTurn` helpers.
+- refactor: pin CDN versions for `petite-vue` (0.4.1) and `marked` (15.0.12) so unversioned CDN updates cannot silently change app behavior.
+- refactor: move the dead root `gemini.js` (superseded by `providers.js`) to `trash/`.
+
 ### Fixed
+- fix: anomaly retries (short output, artifact leak) now count attempts, so runs pause after 5 failed retries instead of retrying forever while showing "1/5".
+- fix: pausing (user pause, refusal, or repetition loop) keeps the run resumable; previously Resume could silently restart the distillation from turn 1.
+- fix: a final response containing only the end marker is treated as completion instead of a "response too short" anomaly, and is not recorded as a document section.
+- fix: match the end marker as a plain text suffix, so custom markers with regex metacharacters work.
+- fix: render toast messages as plain text instead of HTML.
 - fix: auto wait 60s now includes time taken by previous request (starts counting from when request begins, not when it ends)
 - fix: clear the retry banner and `retrying` status once a request succeeds after transient retries.
 - fix: send the documented `X-Title` attribution header to OpenRouter instead of `X-OpenRouter-Title`.

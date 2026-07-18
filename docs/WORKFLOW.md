@@ -186,8 +186,10 @@ This recovery logic is Google-only.
   - when the latest assistant text ends with the configured end marker
 - Anomaly pauses:
   - likely refusal phrasing
-  - very short non-code output (`< 200` chars)
+  - very short non-code output (`< 200` chars), unless the text ends with the end marker; retried up to 5 times (60s waits) before pausing
+  - artifact leaks (`<ctrl94>`); same retry-then-pause behavior
   - high similarity to the prior assistant response (`> 0.9` trigram similarity)
+- Every pause (user pause, refusal, loop, anomaly, error) keeps the run resumable: Resume continues from the existing history instead of restarting.
 - Budgets:
   - time budget → stop with `time budget reached`
   - estimated token budget → stop with `token budget reached (est)`
@@ -204,7 +206,7 @@ This recovery logic is Google-only.
 - malformed local files can fail extraction while native Google mode still works
 - OpenRouter model fetch failure leaves no dynamic model list for OpenRouter until refresh succeeds
 - changing provider or source mode can invalidate the selected model
-- end marker is interpreted as a regex suffix
+- end marker is matched as a plain text suffix; a response that is only the end marker counts as completion, not a short-output anomaly
 - token estimation is approximate only
 
 ## Maintenance
