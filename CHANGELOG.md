@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- docs: refine `detailed_prompt.md` into a density-aware long-form distillation contract with exact-excerpt, coverage, and continuation safeguards.
+- docs: add a reproducible prompt-iteration record under `docs/prompt-optimization/`.
+- test: add a dependency-free evaluator for compression, excerpt share, verbatim quote matching, and completion-boundary behavior.
+- docs: record measured Sol/Luna and Codex/OpenRouter prompt experiments and strengthen the final prompt's full-paragraph excerpt rule.
 - feat: add `gemini-3.1-pro-preview`, `gemini-3-pro-preview`, and `gemini-3-flash-preview` as selectable Google models.
 - feat: add provider selection with `Google AI Studio` and `OpenRouter`.
 - feat: add source mode selection with `Native file` and `Extracted text`.

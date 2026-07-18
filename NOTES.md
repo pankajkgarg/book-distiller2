@@ -4,7 +4,7 @@
 Static client-side book distillation app. Uploads PDF/EPUB, can extract text locally in the browser or use provider-native file handling, and distills content iteratively. No backend. Deployed on GitHub Pages.
 
 ## Current status
-[2026-07-10] Working. Root static app supports Google AI Studio plus OpenRouter with `Native file`/`Extracted text` modes, browser-side PDF/EPUB analysis, and a restored two-tier test pipeline: Vitest unit tests (`npm test`), mocked Playwright E2E (`npm run test:e2e`), and CI via `.github/workflows/ci.yml`. Branch `codex/add-openrouter-and-pdf-parsing` reviewed and fixed; awaiting commit. `src/` is an alternate Vue app, not the deployment target.
+[2026-07-10] Working. The density-aware prompt optimization and full three-section GPT-5.6 comparison are complete. On 21,164 raw source words, Sol/Codex produced 9,088 words (42.9%); Luna/Codex 6,740 (31.8%); Luna/OpenRouter 6,983 (33.0%). A strengthened full-paragraph-excerpt Luna/Codex rerun produced 7,162 words (33.8%) with 5/6 exact quote groups, but still omitted a Chapter 2 excerpt and required three turns, showing that prompt-only excerpt enforcement is unreliable. Results are in `docs/prompt-optimization/results.md`; artifacts are under `temp/prompt_optimization/`. The recommended next design is deterministic excerpt selection followed by Luna weaving and evaluator gating. Vitest is green (28 tests). `src/` remains alternate/non-primary.
 
 ## Architecture
 - Decision: Keep deployment static and browser-first. Why: shipped app must run on GitHub Pages with no backend. See log [2026-04-20].

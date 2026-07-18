@@ -113,3 +113,59 @@ Reviewed codex/add-openrouter-and-pdf-parsing. Fixed: .env/temp/trash not gitign
 
 ## [2026-07-10 09:05] feat | book-distill first-class CLI
 Promoted scripts/codex-book-summary.mjs to an installable CLI: `bin: book-distill` + shebang/exec bit, optional --prompt falling back to temp/summarizer_prompt.md then the built-in DEFAULT_PROMPT now exported from core.js (shared with browser app). Verified with a mock OpenRouter server from a clean cwd (built-in prompt used, 2 parts, end marker) and from repo root (temp/summarizer_prompt.md still wins). Unit + E2E suites green.
+## [2026-07-10 09:30] bug | bundled shell lacks GNU csplit and npm flags
+The first Chapter 1 slicing/test command failed because macOS `csplit` has no `-b` option and this Codex runtime exposes Node without `npm`; no inference request was made.
+## [2026-07-10 19:27] experiment | Gemini cache miss without sticky session
+Two identical 5,027-input-token Gemini 3.1 Pro cache probes returned zero cached tokens. Added an explicit OpenRouter session-id path before attempting full SxS outputs.
+## [2026-07-10 19:29] fix | leave Gemini cache breakpoint tail
+Session pinning alone still produced a full-price miss. Changed Gemini content shaping to cache the stable prompt/source prefix while retaining a small uncached source tail, matching OpenRouter's documented breakpoint pattern.
+## [2026-07-10 19:30] experiment | tiny Grok prompt cache verified
+Two session-pinned Grok 4.3 calls used only 441 input and 16 output tokens each. Cached input rose from 128 to 384 tokens; cost fell from $0.00045685 to $0.00018805, proving automatic provider caching without a documented minimum.
+## [2026-07-10 19:31] status | prior current status superseded
+Root app remained working with the restored test pipeline; CLI cache/reasoning work and SxS gating are now reflected in NOTES current status.
+## [2026-07-10 19:45] experiment | Chapter 1 Gemini vs Grok SxS complete
+Using detailed_prompt.md at medium reasoning, Gemini 3.1 Pro completed in 2 turns ($0.0994748; 8,164 cached) and Grok 4.3 in 5 turns ($0.0503155; 43,840 cached). Gemini was tighter and followed formatting better; Grok was longer and more extractive.
+## [2026-07-10 19:46] note | interactive SxS report generated
+Created `temp/sxs_results/first90_chapter1_gemini31pro_vs_grok43_sxs.html` with full outputs, per-turn cache/cost evidence, view controls, and qualitative verdict. Verified in-browser with no console errors.
+## [2026-07-10 19:47] status | prior current status superseded
+The earlier cache-gated SxS status is superseded by the completed Chapter 1 comparison and report now recorded in NOTES.
+
+## [2026-07-10 19:52] fix | Qwen OpenRouter prompt caching
+Alibaba Qwen requires an explicit cache_control breakpoint to cache; CLI only added it for Claude+Gemini, so Qwen ran fully uncached. Added isOpenRouterQwenModel + usesEmbeddedCacheBreakpoint and routed Qwen through the embedded-breakpoint path in scripts/codex-book-summary.mjs. Verified live: qwen3.7-max turn-2 cached_input=5575 (was 0).
+
+## [2026-07-10 19:52] experiment | SxS Gemini 3.1 Pro vs GPT-5.6 Luna vs Qwen3.7 Max
+Half of First-90-Days ch1 (~5.6k tok) + detailed_prompt.md, medium reasoning, via OpenRouter. Caching (real CLI): GPT cached 34k/44k input (implicit ✅), Qwen cached 5.5k (✅ after fix), Gemini cached=0 AND cache_write=0 (explicit breakpoint inert in the two-block split; single-block probe DID cache). Cost: Gemini $0.119 (no cache, priciest), GPT $0.044 (cheapest), Qwen $0.052. Quality: Gemini heaviest verbatim + best voice + clean end_of_book but weakest TTS pauses; Qwen best TTS pauses + clean synthesizing close; GPT cleanest structure/cheapest but rewrote more and left 3 "please provide next section" meta lines + no end marker. Outputs in temp/sxs_ch1/.
+
+## [2026-07-10 20:58] experiment | Single-shot SxS (no 5k chunk rule)
+temp/detailed_prompt_single_shot.md (immersive style, chunking removed) + --max-parts 1. All 3 finished in ONE turn with clean <end_of_book>; cost dropped (Gemini $0.119->$0.059, GPT $0.044->$0.038, Qwen $0.052->$0.035). Output/source word ratio diverged by model: Gemini 0.52x (self-compressed, but dropped the Cultural-Norms checklist), GPT 1.14x (28 blockquotes but 0 TTS pauses), Qwen 0.97x (13/13 coverage, 34 blockquotes, 14 pauses -> best fit for the audio-script prompt). Multi-turn machinery + caching only earns its keep on full books that exceed a single 64-128k output. Outputs in temp/sxs_ch1_1shot/.
+
+## [2026-07-10 22:30] feat+experiment | Direct Gemini distiller w/ explicit caching (scripts/gemini-distill.mjs)
+New standalone REST harness: creates a Gemini context cache (book+prompt), multi-turn loop, thinking on, per-turn telemetry (tokens/cache%/$/compaction), resumable. Verified on Sources of Power (Gary Klein, ~175k cached tokens) w/ gemini-3.1-pro-preview: explicit caching WORKS (turn1 100% cache hit, turn2 97.4%), thinking on (~3.2-3.4k thoughts/turn). Gemini self-summarized the whole 17-ch book to 5.3% (8.4k out tok) in only 2 turns + <end_of_book> rather than a long immersive expansion. Checkpoint cost $0.64 total (cache-create $0.35 one-time + storage + $0.13/turn). Output: temp/sources_of_power/.
+## [2026-07-10 22:35] status | prior current status superseded
+The prior NOTES status recorded the Gemini 3.1 Pro vs Grok 4.3 Chapter 1 SxS as the latest work; prompt optimization and GPT-5.6 full-source comparisons now supersede it.
+
+## [2026-07-10 22:35] experiment | full-source Sol density-aware prompt
+GPT-5.6 Sol via ChatGPT-authenticated Codex distilled 21,164 source words to 9,088 (42.9%) in two turns; all 9 blockquotes matched exact contiguous source text and completion was clean.
+
+## [2026-07-10 22:35] experiment | matched Luna Codex vs OpenRouter
+With identical source and prompt, Luna/Codex produced 6,740 words (31.8%) and Luna/OpenRouter 6,983 (33.0%), both one-turn/clean. Length and core coverage were close; OpenRouter retained the preface and more heading/checklist structure, while Codex consolidated more aggressively.
+
+## [2026-07-10 22:35] fix | strengthen exact full-paragraph excerpts
+The final prompt now requires a complete uncut paragraph per major chapter/prefatory section and forbids decorative quotation marks around blockquotes; measured full runs had favored short slogans and paraphrase.
+## [2026-07-10 22:46] experiment | strengthened Luna full-paragraph excerpts
+Full-source Luna/Codex rerun produced 7,162 words (33.8%) in three turns with 241 excerpt words and 5/6 exact quote groups. Excerpts became longer, but Chapter 2 still had none, so prompt-only per-section enforcement failed; use deterministic selection + weaving when excerpts are a hard requirement.
+
+## [2026-07-10 23:05] experiment | Sources of Power DEEP distillation (Gemini 3.1 Pro)
+Re-ran with summarizer_prompt.md + anti-compression steering in begin/continue turns (found detailed_prompt.md == summarizer_prompt.md; smallness was Gemini compressing, not the prompt). Steering stopped early <end_of_book>; paced ~1 chapter/turn -> all 17 chapters in 15 turns, 47,388 words = 37% of source (vs shipped 6,448 words / 5.3%). Cost $3.68 (cache create $0.35 + storage $0.16 + gen $3.18); back-half turns (T9+) crossed the 200k input tier as history grew, ~doubling per-turn cost. Caching solid (174,237 cached every turn; cache% fell 100->75% only from history growth). Deep output kept separate: temp/sources_of_power/deep/. Shipped 2-turn summary preserved.
+
+## [2026-07-11 00:05] experiment | Chapter-wise parallel distillation (ch1-5 Sources of Power)
+New scripts/gemini-chapter-distill.mjs: chapter slicing (manifest), greedy packing (chapters atomic, ch1+2 merged under 11k cap), 4 parallel calls, style-contract overrides (no title line/parts/end_of_book). vs rolling turns 1-5: $0.450 vs $0.517(+$0.35 cache), 66s wall vs 191s, 22,765 vs 17,079 out tok (57% vs 43% compaction) — more depth, cheaper, 3x faster. SxS artifact: https://claude.ai/code/artifact/3a8579b0-9e8f-457b-bf4c-bc1b2aac9d62. Chapter boundaries found via title grep (TOC + body occurrence pattern).
+
+## [2026-07-11 07:45] refactor | app.js turn-loop dedup + modernization sweep
+Extracted duplicated first-turn/continuation logic into runGenerationTurn/recordTurn; fixed anomaly retries never counting (retried forever), pause always resumable (Resume no longer restarts from turn 1), bare end-marker reply now completes instead of "too short" pause. Pinned petite-vue@0.4.1 + marked@15.0.12; moved dead root gemini.js to trash/. Verified: 28 vitest + 5 mocked E2E green, plus a throwaway stubbed full-run Playwright spec (2 turns, end marker, history shapes) — deleted after passing.
+
+## [2026-07-11 07:50] note | refactor sweep: deferred findings
+scripts/codex-book-summary.mjs:~1700 hardcodes /Users/pankaj/work/content/vendingbench_stocks/.env as DeepSeek key fallback (left as-is); gemini-distill.mjs hardcodes "Sources of Power" output names/runDir; scripts duplicate sleep/dotenv/argparse/POST-retry helpers (candidate scripts/lib/); core.js vs codex CLI estimateTokens/countWords/normalizeWhitespace have DIVERGED semantics — do not blindly unify.
+
+## [2026-07-11 00:40] note | Kimi K3 access + caching + SxS vs Gemini
+KIMI_API_KEY (sk-kim...) is a Kimi Code SUBSCRIPTION key: Anthropic-compatible endpoint https://api.kimi.com/coding/v1/messages, header x-api-key, model id `k3` (NOT the moonshot.ai OpenAI PAYG API, which 401s this key). reasoning_effort only accepts "max"; here used Anthropic thinking budget 12k. Caching = automatic prefix caching (Anthropic usage shape): 2-call probe -> call2 cache_read_input_tokens=7424/7675, no cache_creation charge ($0.30 hit vs $3 miss /Mtok); small <~2k prefix does not cache. Ch3 SxS: Kimi 5,195 words / 7,724 out tok / 226s (~4x slower); Gemini 5,732 words / 6,870+1,930 / 60s / $0.123. Artifact https://claude.ai/code/artifact/05aeff3d-9b3f-4f53-8e13-324c9630adba
