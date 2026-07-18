@@ -4,6 +4,8 @@ dist
 dist-ssr
 *.local
 
+detailed_prompt.md
+
 .svelte-kit
 
 yarn-error.log*
@@ -31,6 +33,14 @@ coverage/
 # Project scratch dirs (see AGENTS.md conventions)
 temp/
 trash/
+
+# Local book inputs and distilled outputs (copyrighted; never commit)
+books/
+Sources_of_Power_Chapters_1-3.txt
+The_First_90_Days_First_3_Sections.txt
+
+# Claude Code local files and worktrees
+.claude/
 
 # Playwright
 test-results/
