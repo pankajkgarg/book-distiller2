@@ -1,17 +1,17 @@
 # Notes
 
 ## Anchor
-- current default/champion: A exact-envelope vivid/high = 46.5%; user explicitly loved its prose and pacing
-- shortlist: A is champion; identical A at low effort is rejected after zero-text token starvation
+- current default/champion: v3v_flexible (flexible band + escape hatch) at high effort, with an Opus-written advisory book map and aim-low bands (K3 drifts +5-15 pts over any ceiling); exact-envelope and binding-omit regimes retired after SxS
+- shortlist: quote fidelity = content-match bar (user decision); tables should suit TTS; ~$3/book cost anchor
 - artifacts: `detailed_prompt.md` · `docs/prompt-optimization/kimi-k3-feedback.md` · `docs/prompt-optimization/experiments.jsonl`
-- next: get user feedback on held-out *Atomic Habits* output; then tighten the adaptive envelope/omission contract or finalize; do not run another Kimi generation first; do not target fiction
+- next: await user listen-through verdict on 51% edition; per-chapter re-lifts on request. Future books: invoke the `book-distill` personal skill (~/.claude/skills/book-distill — packaged recipe, scripts, mapper prompts, calibration); do not target fiction
 - standing gates: Kimi alone writes distillation prose; Codex/Claude may map chapters and tiers; visible length in words, API usage in tokens; preserve every run's exact prompt/output/telemetry/evaluation
 
 ## Overview
 Static client-side book distillation app. Uploads PDF/EPUB, can extract text locally in the browser or use provider-native file handling, and distills content iteratively. No backend. Deployed on GitHub Pages.
 
 ## Current status
-[2026-07-18] A remains the Kimi K3 editorial champion and `detailed_prompt.md` now contains its exact prompt. The held-out high-effort *Atomic Habits* Chapter 1 run used a pivotal 40–60% adaptive band but returned 3,296 of 4,388 words (75.1%), using 14,517 API output tokens in 481 seconds; it retained the important lessons but stayed too close to the source, ignored several mapped omissions, and cleared only 6/10 strict quote checks (8/10 content checks). No further Kimi generation should run before user feedback. Low effort remains rejected after its earlier 24,000-token zero-prose failure.
+[2026-08-01] Recipe packaged as the `book-distill` personal skill (~/.claude/skills/book-distill, symlinked into ~/.codex/skills) and validated on two fresh books, both delivered to output/ as md + HTML reader pages: 7 Rules of Power (49.8%, 62/62 quotes) and Give and Take (44.1%, 86/86 content-faithful after one backstop-caught ch1 rerun). Sources of Power 51.1% edition still awaiting user listen-through verdict (re-lift levers: ch1/ch2/ch17). EPUB preferred over PDF for extraction; skill's html2txt.mjs replaces textutil (mojibake).
 
 ## Architecture
 - Decision: Keep deployment static and browser-first. Why: shipped app must run on GitHub Pages with no backend. See log [2026-04-20].

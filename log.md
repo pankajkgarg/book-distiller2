@@ -192,3 +192,33 @@ The orphaned “User loved A” line immediately above is the body of the 14:20 
 
 ## [2026-07-18 15:14] experiment | adaptive envelope overshoots on Atomic Habits
 K3 high distilled held-out Chapter 1 to 3,296/4,388 words (75.1%) despite a pivotal 40–60% band; 14,517 API output tokens, 481s, 6/10 strict quotes and 8/10 content matches. Coverage was complete but mapped omissions were frequently ignored; pause for user feedback (`temp/prompt_opt_k3/v3v_flexible__atomic_habits_ch01__pivotal_high`).
+## [2026-07-18 16:05] decision | user feedback on held-out Atomic Habits run
+User verdict: held-out flexible-band run (75.1%) is "actually great" despite exceeding the 40-60% band; judge by reading, not band arithmetic. Quote fidelity: content-match sufficient, no deterministic repair pass. Cost: matters, anchor ~$3/book (old Gemini 3.0 Pro pricing); quality still first.
+## [2026-07-18 16:06] decision | next experiment: length-control regime comparison
+User cannot choose length control abstractly; authorized side-by-side of regimes (exact envelope vs flexible band+hatch vs hard omit list) on contrasting chapters incl. a genuinely bloated non-fiction chapter from /Volumes/COLDSTORE/temp/Books.
+## [2026-07-18 16:25] experiment | length-regime comparison launched
+5 K3 high runs: AH ch1 x {exact hard-ceiling, omit-binding} + Essentialism ch1 (new bloat source, 6,676 w) x {exact, flexible+hatch, omit-binding}. New prompt v3v_omit (binding book-map ledger, no escape hatch); run.mjs gains --budget-style hard|firm|hatch. Opus agent mapping Essentialism ch1.
+## [2026-07-18 17:40] experiment | length-regime round 2 complete
+AH ch1: flexible 75.1%/14.5k, exact 67.4%/17.0k, omit 63.9%/13.3k. ESS ch1 (6,676w bloat): exact 61.8%/27.8k/799s, flexible 55.6%/15.9k, omit 52.4%/19.2k. All overshoot band top 2-15pts; map bands+omit ledger do more work than enforcement wording; omit-binding cheapest+shortest; AH omit run deleted compounding-catalogue section. Quotes 12-15/13-16 content-matched. Feedback page: temp/prompt_opt_k3/feedback_regimes_2026-07-18.html
+## [2026-07-18 19:05] decision | champion recipe locked: flexible+hatch
+User picked flexible band + escape hatch (v3v_flexible) after regime SxS: equal thinking cost to omit-binding, rescues good passages the map wrongly condemns; map stays advisory but present (it killed the worst padding in all regimes). Exact arithmetic and binding-omit retired. Bands set ~10pts below desired (K3 drifts +5-15). Next: full Sources of Power book run, then map-model SxS (Opus vs GPT-5.6 Terra high vs Sol medium).
+## [2026-07-18 19:20] status | prior current status superseded
+Old status (A exact-envelope champion; held-out AH pending feedback) superseded: user feedback received, flexible+hatch locked as champion, full SoP book run started.
+## [2026-07-18 20:15] note | Kimi quota now queryable programmatically
+GET https://api.kimi.com/coding/v1/usages (x-api-key auth) returns 5h-window + weekly quota, parallel limit, reset times — same data as kimi-code CLI's interactive display (endpoint found in its 0.26.0 bundle). Helper: temp/prompt_opt_k3/kimi_quota.mjs. At discovery: 5h 60/100 used, weekly 50/100.
+## [2026-07-18 20:45] experiment | FULL Sources of Power book distilled with locked recipe
+17/17 chapters, 45,352w from 105,154 (42.6%), all end_turn, 254,313 K3 out tokens, ~66 min wall (4 parallel workers, concurrency tested OK). Quotes 160/165 source-faithful (16 = em-dash extraction repairs, 5 word-level drifts). Quota: run fit in one 5h window (60->76/100). Cost ~=$3.60 K3 + ~$2 Opus map at API rates. Artifacts: temp/prompt_opt_k3/sources_of_power_distilled.{md,html}, v3v_flexible__sop_full__book/.
+## [2026-07-18 21:05] decision | user feedback on full-book output + next steps
+User: wants ElevenReader-playable md (delivered: output/Sources_of_Power_distilled_K3.md); felt cuts went "a bit too deep" in places but NO full regeneration; approved mapper SxS scoped to ch3 (Terra-high + Sol-medium map ch3, then Kimi generates from each). Depth fix will be targeted per-chapter reruns with raised bands once user names thin spots.
+## [2026-07-18 21:50] experiment | mapper SxS ch3: scope >> model
+4 arms of SoP ch3: whole-book-map run 40.3% vs chapter-scoped maps Opus 65.4% / Terra-high 67.8% / Sol-medium 63.4%. All perfect quote fidelity, same structure, editorially interchangeable -> mapper model barely matters; MAP SCOPE drives ~25pt compression difference. Sol-medium sufficient for mapping (cheapest). Depth lever found for "too deep" chapters: re-run with chapter-scoped map. Cost: 3 runs ate ~23 quota units (76->99/100!) — unit accounting is nonlinear vs tokens; window exhausted, resets ~2h. Report: temp/prompt_opt_k3/mapper_sxs_ch3.html
+## [2026-07-19 00:20] decision | 65% depth is the standard; full regen launched
+User verdict: 65% chapter-scoped depth wins, "the 40% version read like crap". Whole-book map retired for generation; per-chapter maps extracted from the Opus map (ch_maps/chNN_map.md, free) — the exact artifact that produced the winning ch3 arm. Regen of 16 chapters launched (ch3 reused): quota-aware driver sop65_run.sh, 3 parallel, pauses below 12 window-units. Expect ~68k words (~65%), ~390k out tokens, possibly spanning two 5h windows.
+## [2026-07-19 01:30] experiment | 65%-depth regeneration complete, new edition assembled
+16 chapters regenerated with chapter-scoped maps + ch3 reused: 54,185w / 105,974 = 51.1% (up from 42.6%), all end_turn, quotes 175/176 source-faithful, 261,219 out tokens, ~45 min. Biggest lifts where old was thinnest: ch7 35->50, ch9 35->45, ch10 35->48, ch14 36->53, ch16 52->71. ElevenReader file refreshed (output/Sources_of_Power_distilled_K3.md; old kept as _v1_42pct). Chapter-scoped maps land lower at book scale (~51%) than the single-ch3 test (65%) — variance, not regime. Quota after: 5h 73/100, weekly 73/100.
+
+## [2026-07-19 12:30] decision | recipe packaged as personal skill
+Locked K3 distillation recipe now lives at ~/.claude/skills/book-distill (SKILL.md + distill/evaluate/assemble/quota scripts + Sol mapper prompts + calibration facts). Validated: evaluator reproduces sop65 numbers (51.0%, 1 drift), assembler clean, smoke PASS. temp/prompt_opt_k3 remains the experimental record only.
+
+## [2026-08-01 15:00] status | book-distill skill validated on two fresh books
+7 Rules of Power (49.8%, 62/62 quotes) and Give and Take (44.1%, 86/86 content-faithful; ch1 backstop 98% caught+rerun to 50.7%) delivered to output/. Skill symlinked into ~/.codex/skills. Fixes landed: intro-tier wording, html2txt.mjs, report.mjs. ~44 window units, ~$2.65 API-equivalent, $0 actual.

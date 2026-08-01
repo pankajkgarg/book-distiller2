@@ -34,6 +34,7 @@ trash/
 
 # Local book inputs and distilled outputs (copyrighted; never commit)
 books/
+output/
 Sources_of_Power_Chapters_1-3.txt
 The_First_90_Days_First_3_Sections.txt
 
