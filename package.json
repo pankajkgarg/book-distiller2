@@ -11,6 +11,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "book:summary": "node scripts/codex-book-summary.mjs",
+    "book:map": "node scripts/codex-adaptive-map.mjs",
+    "book:epub": "node scripts/markdown-to-epub.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

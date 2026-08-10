@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- feat: record the exact Codex mapping model, raw usage events, token categories, pricing basis, long-context adjustments, and reproducible API-equivalent cost for adaptive runs.
+- feat: add and validate an adaptive Kimi chapter runner and editorial diagnostics, plus whole-book mapping/prose prompts that make globally comparative Scene/Explain/Evidence/Mention/Omit/Excerpt decisions without chapter length floors.
+- feat: add a dependency-free EPUB 3 packager for assembled Markdown distillations, including metadata, source-art or generated covers, chapter navigation, and reader typography.
 - docs: add an agentic nonfiction book-mapping prompt and auditable Kimi K3 prompt-feedback experiment with exact prompt, telemetry, and quote-check metrics; copyrighted generated prose remains local.
 - docs: track the user-selected final nonfiction distillation prompt in `detailed_prompt.md`.
 - docs: record the user-selected Kimi K3 champion, a zero-prose low-effort failure, and a held-out adaptive-envelope validation without estimating missing provider metrics.

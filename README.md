@@ -20,6 +20,10 @@ See `docs/WORKFLOW.md` for the authoritative runtime flow, retries, provider beh
 - `npm run build`: Production build to `dist/`
 - `npm run preview`: Preview the built site locally
 - `npm run book:summary -- --input temp/book.pdf --prompt temp/summarizer_prompt.md`: Extract a PDF/EPUB/TXT/MD source locally, run `codex exec -m gpt-5.5`, and continue until `<end_of_book>`
+- `npm run book:map -- --src temp/distill_book/src_book.txt --prompt docs/prompt-optimization/adaptive-book-map-prompt.md --out temp/distill_book/map`: Build a whole-book editorial map and retain exact Codex model/token/cost telemetry
+- `npm run book:epub -- --input output/Book_distilled_K3.md --output output/Book_distilled_K3.epub`: Package a distilled Markdown book as an EPUB 3 file
+- `node scripts/kimi-adaptive-distill.mjs …`: Generate globally mapped chapters with Kimi K3, without fixed chapter word floors or target percentages
+- `node scripts/audit-adaptive-output.mjs <chapter.md> […]`: Report excerpt share and name-like prose signals for editorial review
 - `npm test`: Vitest unit tests over the pure `core.js` helpers
 - `npm run test:e2e`: Playwright end-to-end suite with mocked provider responses
 - `npm run test:e2e:headed`: Same suite in a headed browser
@@ -170,6 +174,19 @@ The script:
 - writes `<Book Name> - summary - <lang>.md` plus chunk/event files under `temp/codex_runs/`
 - writes `<Book Name> - usage - <lang>.md` and `.json` with book-token estimate, turn count, input tokens, cached input tokens, cache-write input tokens, uncached input tokens, output tokens, and reasoning output tokens
 
+### EPUB packaging
+
+Package an assembled Markdown distillation as a self-contained EPUB 3 book:
+
+```bash
+npm run book:epub -- \
+  --input output/Book_distilled_K3.md \
+  --output output/Book_distilled_K3.epub \
+  --cover temp/Book_cover.jpg
+```
+
+The exporter uses the Markdown title and `## Chapter …` headings to create book metadata, a cover page, chapter files, and both EPUB 3 and legacy-compatible navigation. Pass an original JPEG, PNG, or SVG cover with `--cover`; without one, the exporter generates a typographic cover. It has no npm dependencies; the system `zip` command is required. Use `--title`, `--author`, or `--language` to override inferred metadata.
+
 To generate a translated summary, set `--language` and optionally a filename suffix with `--lang-code`. For non-English languages, the script appends a short language instruction to the summarizer prompt before the extracted source; English runs do not get a language instruction.
 
 ```bash
@@ -195,6 +212,64 @@ node scripts/codex-book-summary.mjs --input temp/book.pdf --extract-only
 ```
 
 Caveat: this workflow deliberately extracts locally first, then sends clean Markdown text to the selected model provider.
+
+### Adaptive editorial pipeline
+
+For nonfiction whose value is unevenly distributed, the experimental adaptive
+pipeline separates whole-book selection from chapter prose. A reasoning model first
+compares claims, examples, and evidence across the complete book using
+`docs/prompt-optimization/adaptive-book-map-prompt.md`. Its global map and binding
+chapter briefs assign each selected source element one treatment:
+
+- `Scene` for an example whose causal narrative itself earns space
+- `Explain` for a claim, mechanism, framework, distinction, or caveat
+- `Evidence` for a compact study or transfer case
+- `Mention` for a small qualification, bridge, or application
+- `Omit` for redundant or non-contributing material
+- `Excerpt` for a value-selected, source-anchored authorial passage
+
+The prose stage uses `docs/prompt-optimization/adaptive-distiller-prompt.md`. It has
+no chapter minimum, fixed compression ratio, name quota, or example quota. Names
+remain natural inside selected material; examples survive whenever they perform
+distinct explanatory, evidentiary, boundary, transfer, application, or mnemonic
+work.
+
+Given a prepared `src_book.txt`, whole-book map, chapter briefs, and titles file:
+
+```bash
+npm run book:map -- \
+  --src temp/distill_book/src_book.txt \
+  --prompt docs/prompt-optimization/adaptive-book-map-prompt.md \
+  --out temp/distill_book/map \
+  --model gpt-5.6-sol \
+  --effort medium \
+  --billing-mode subscription
+
+node scripts/kimi-adaptive-distill.mjs \
+  --src temp/distill_book/src_book.txt \
+  --global-map temp/distill_book/map/global_map.md \
+  --brief-dir temp/distill_book/map/chapter_briefs \
+  --titles temp/distill_book/map/titles.json \
+  --prompt docs/prompt-optimization/adaptive-distiller-prompt.md \
+  --out temp/distill_book/out_v2 \
+  --parallel 3 \
+  --effort high
+```
+
+The mapping runner preserves raw `codex-map-events.jsonl` plus JSON and Markdown
+usage reports. Reports include the explicit model, elapsed time, input, cached
+input, cache-write input, output and reasoning tokens, long-context pricing, the
+pricing source/date, API-equivalent cost, and actual incremental cost basis.
+Default GPT-5.6 Sol prices are pinned to the official values checked on
+2026-08-10; pass `--input-price`, `--cached-input-price`, `--output-price`,
+`--pricing-date`, and `--pricing-source` after checking current official pricing.
+Use `--calculate-only --events <saved.jsonl>` to rebuild the cost report later.
+
+Run the skill evaluator for retention, completion, and exact-excerpt fidelity, then
+use `scripts/audit-adaptive-output.mjs` as a diagnostic—not an automatic quality
+gate. This workflow sends the complete source text to the selected mapping and prose
+providers, so obtain the user's explicit authorization before a copyrighted book is
+transmitted.
 
 ## Troubleshooting
 
